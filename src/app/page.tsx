@@ -2,12 +2,12 @@
 
 import { useState, useCallback, useEffect, useRef } from "react"
 import { Header } from "@/components/Header"
-import { Viewer } from "@/components/Viewer"
+import { WebGLViewer } from "@/components/WebGLViewer"
 import { Dock, type Tool, type ShapeType } from "@/components/Dock"
 import { Sidebar } from "@/components/Sidebar"
 import { Inspector } from "@/components/Inspector"
 import { ThemeProvider } from "@/components/ThemeProvider"
-import { useCanvasStore, usePdfStore } from "@/lib/store"
+import { useCanvasStore, usePdfStore, useSettingsStore } from "@/lib/store"
 
 interface Page {
   id: number
@@ -85,8 +85,32 @@ export default function Home() {
   }, [clearPdf])
 
 
-  const { undo, redo, canUndo, canRedo } = useCanvasStore()
-  const { pagesMeta } = usePdfStore()
+  const { undo, redo, canUndo, canRedo, strokes } = useCanvasStore()
+  const { pagesMeta, pdfPath } = usePdfStore()
+  const { autoSave, autoSaveInterval } = useSettingsStore()
+
+  useEffect(() => {
+    if (!autoSave) return
+    
+    const saveData = () => {
+      try {
+        const data = {
+          strokes,
+          pages,
+          currentPage,
+          pdfPath,
+          timestamp: Date.now(),
+        }
+        localStorage.setItem("annotate-studio-autosave", JSON.stringify(data))
+        console.log("Auto-saved at", new Date().toLocaleTimeString())
+      } catch (e) {
+        console.error("Auto-save failed:", e)
+      }
+    }
+    
+    const interval = setInterval(saveData, autoSaveInterval * 1000)
+    return () => clearInterval(interval)
+  }, [autoSave, autoSaveInterval, strokes, pages, currentPage, pdfPath])
 
   const handlePdfLoaded = useCallback(() => {
     if (pagesMeta && pagesMeta.length > 0) {
@@ -183,7 +207,7 @@ export default function Home() {
             onAddPage={handleAddPage}
             onDeletePage={handleDeletePage}
           />
-          <Viewer
+          <WebGLViewer
             currentPage={currentPage}
             currentPageIndex={pages.findIndex(p => p.id === currentPage) + 1}
             totalPages={pages.length}

@@ -126,7 +126,7 @@ function SidebarComponent({ currentPage, onPageChange, pages, onAddPage, onDelet
 
   return (
     <TooltipProvider delayDuration={0}>
-      <aside className="absolute left-4 top-20 z-20 flex h-[calc(100vh-160px)] w-48 flex-col rounded-2xl border border-border/50 bg-background/95 shadow-2xl backdrop-blur-xl transition-all duration-300 dark:bg-zinc-900/95">
+      <aside className="absolute left-4 top-20 z-20 flex h-[calc(100vh-160px)] w-48 flex-col rounded-2xl border border-border/50 bg-background/95 shadow-2xl backdrop-blur-xl transition-all duration-300 dark:bg-zinc-900/95 gpu-accelerated">
         <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/50 px-3">
           <div className="flex items-center gap-2">
             <Layers className="h-4 w-4 text-muted-foreground" />

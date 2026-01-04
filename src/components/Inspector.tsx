@@ -127,7 +127,7 @@ export function Inspector({
 
   return (
     <TooltipProvider delayDuration={0}>
-      <aside className="absolute right-4 top-20 z-20 flex w-56 flex-col rounded-2xl border border-border/50 bg-background/95 shadow-2xl backdrop-blur-xl transition-all duration-300 dark:bg-zinc-900/95">
+      <aside className="absolute right-4 top-20 z-20 flex w-56 flex-col rounded-2xl border border-border/50 bg-background/95 shadow-2xl backdrop-blur-xl transition-all duration-300 dark:bg-zinc-900/95 gpu-accelerated">
         <div className="flex h-12 items-center justify-between border-b border-border/50 px-3">
           <div className="flex items-center gap-2">
             <Palette className="h-4 w-4 text-muted-foreground" />

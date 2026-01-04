@@ -1,7 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState, useEffect, memo } from "react"
-import { cn } from "@/lib/utils"
+import { useCallback, useRef, useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Tooltip,
@@ -18,13 +17,8 @@ import {
   RotateCcw,
 } from "lucide-react"
 import type { Tool, ShapeType } from "@/components/Dock"
-import { useCanvasStore, usePdfStore } from "@/lib/store"
-import * as wasmEngine from "@/lib/wasm-engine"
-
-interface Point {
-  x: number
-  y: number
-}
+import { useCanvasStore, usePdfStore, useSettingsStore } from "@/lib/store"
+import { webglRenderer, type Point } from "@/lib/webgl-renderer"
 
 interface ToolSettings {
   color: string
@@ -34,7 +28,7 @@ interface ToolSettings {
   backgroundColor?: string
 }
 
-interface ViewerProps {
+interface WebGLViewerProps {
   currentPage: number
   currentPageIndex: number
   totalPages: number
@@ -51,7 +45,7 @@ interface ViewerProps {
   onCanvasReady?: (canvas: HTMLCanvasElement | null) => void
 }
 
-export function Viewer({
+export function WebGLViewer({
   currentPage,
   currentPageIndex,
   totalPages,
@@ -65,21 +59,22 @@ export function Viewer({
   pendingSymbol,
   onSymbolPlaced,
   onCanvasReady,
-}: ViewerProps) {
+}: WebGLViewerProps) {
   const getToolSettings = (tool: string): ToolSettings => {
     return toolSettings[tool] || toolSettings.pen
   }
+
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  
-  useEffect(() => {
-    onCanvasReady?.(canvasRef.current)
-  }, [onCanvasReady])
+  const [webglReady, setWebglReady] = useState(false)
+  const [fps, setFps] = useState(0)
+  const [gpuInfo, setGpuInfo] = useState("")
+
   const [isDrawing, setIsDrawing] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
   const [panOffset, setPanOffset] = useState<Point>({ x: 0, y: 0 })
   const [lastPanPoint, setLastPanPoint] = useState<Point>({ x: 0, y: 0 })
-  const [currentStroke, setCurrentStroke] = useState<Point[]>([])
+  const currentStrokeRef = useRef<Point[]>([])
   const [shapeStart, setShapeStart] = useState<Point | null>(null)
   const [shapeEnd, setShapeEnd] = useState<Point | null>(null)
   const [symbolStart, setSymbolStart] = useState<Point | null>(null)
@@ -91,17 +86,10 @@ export function Viewer({
   const [isResizing, setIsResizing] = useState(false)
   const [resizeCorner, setResizeCorner] = useState<'tl' | 'tr' | 'bl' | 'br' | null>(null)
   const [isZooming, setIsZooming] = useState<'in' | 'out' | null>(null)
-  const [pdfImage, setPdfImage] = useState<HTMLImageElement | null>(null)
-  const [fps, setFps] = useState(0)
-  const [wasmReady, setWasmReady] = useState(false)
-  const rafIdRef = useRef<number | null>(null)
-  const fpsIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const [rubberBandStart, setRubberBandStart] = useState<Point | null>(null)
   const [rubberBandEnd, setRubberBandEnd] = useState<Point | null>(null)
   const [isRubberBanding, setIsRubberBanding] = useState(false)
-  
   const [currentPressure, setCurrentPressure] = useState(0.5)
-  const activePointerId = useRef<number | null>(null)
 
   const strokes = useCanvasStore(s => s.strokes)
   const addStroke = useCanvasStore(s => s.addStroke)
@@ -122,32 +110,17 @@ export function Viewer({
   const paste = useCanvasStore(s => s.paste)
   const deleteSelectedStrokes = useCanvasStore(s => s.deleteSelectedStrokes)
   const duplicateSelected = useCanvasStore(s => s.duplicateSelected)
-  
+
   const pdfPath = usePdfStore(s => s.pdfPath)
   const pagesMeta = usePdfStore(s => s.pagesMeta)
   const renderedPages = usePdfStore(s => s.renderedPages)
   const setRenderedPage = usePdfStore(s => s.setRenderedPage)
-  
-  // AI Symbol Recognition temporarily disabled
-  // const symbolRecognitionEnabled = useSettingsStore(s => s.symbolRecognitionEnabled)
-  // const symbolRecognitionSensitivity = useSettingsStore(s => s.symbolRecognitionSensitivity)
-  const symbolRecognitionEnabled = false
-  const symbolRecognitionSensitivity = 0.7
 
-  const handleTextSubmit = useCallback(() => {
-    if (textInput && textInput.value.trim()) {
-      const textSettings = getToolSettings("text")
-      addStroke({
-        points: [textInput.position],
-        color: textSettings.color,
-        thickness: textSettings.thickness,
-        opacity: textSettings.opacity,
-        tool: `text:${textInput.value}`,
-        pageId: currentPage,
-      })
-    }
-    setTextInput(null)
-  }, [textInput, getToolSettings, currentPage, addStroke])
+  const targetFps = useSettingsStore(s => s.targetFps)
+  const gridEnabled = useSettingsStore(s => s.gridEnabled)
+  const gridSize = useSettingsStore(s => s.gridSize)
+  const showFpsCounter = useSettingsStore(s => s.showFpsCounter)
+  const pressureSensitivity = useSettingsStore(s => s.pressureSensitivity)
 
   const currentPageMeta = pagesMeta.find((p) => p.pageNumber === currentPage)
   const currentPageImage = renderedPages.get(currentPage)
@@ -155,9 +128,50 @@ export function Viewer({
   const canvasHeight = currentPageMeta ? Math.round(currentPageMeta.height) : 842
   const scale = zoom / 100
 
+  useEffect(() => {
+    onCanvasReady?.(canvasRef.current)
+  }, [onCanvasReady])
+
+  useEffect(() => {
+    if (!canvasRef.current) return
+    
+    const success = webglRenderer.init(canvasRef.current, canvasWidth, canvasHeight)
+    if (success) {
+      setWebglReady(true)
+      setGpuInfo(webglRenderer.getGpuInfo())
+    }
+
+    const fpsInterval = setInterval(() => {
+      setFps(webglRenderer.getFps())
+    }, 500)
+
+    return () => {
+      clearInterval(fpsInterval)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (webglReady) {
+      webglRenderer.resize(canvasWidth, canvasHeight)
+    }
+  }, [canvasWidth, canvasHeight, webglReady])
+
+  useEffect(() => {
+    if (webglReady) {
+      webglRenderer.setTargetFps(targetFps)
+    }
+  }, [webglReady, targetFps])
+
+  useEffect(() => {
+    if (webglReady) {
+      webglRenderer.setGridEnabled(gridEnabled)
+      webglRenderer.setGridSize(gridSize)
+    }
+  }, [webglReady, gridEnabled, gridSize])
+
   const pdfLoadingRef = useRef(false)
   const pdfQueueRef = useRef<number[]>([])
-  
+
   useEffect(() => {
     if (!pdfPath || !currentPageMeta) return
     
@@ -182,9 +196,7 @@ export function Viewer({
       
       pdfLoadingRef.current = true
       const pageNum = pdfQueueRef.current.shift()!
-      
       await loadPage(pageNum)
-      
       pdfLoadingRef.current = false
       
       if (!cancelled && pdfQueueRef.current.length > 0) {
@@ -212,193 +224,74 @@ export function Viewer({
   }, [currentPage, pdfPath, currentPageMeta, pagesMeta.length, renderedPages, setRenderedPage])
 
   useEffect(() => {
-    if (currentPageImage) {
-      const img = new Image()
-      img.onload = () => setPdfImage(img)
-      img.src = currentPageImage
-    } else {
-      setPdfImage(null)
+    if (webglReady) {
+      webglRenderer.setPdfImage(currentPageImage || null)
     }
-  }, [currentPageImage])
-
-  const fpsRef = useRef(0)
-  
-  useEffect(() => {
-    let mounted = true
-    async function init() {
-      const success = await wasmEngine.initWasm()
-      if (mounted && success) {
-        wasmEngine.createEngine(canvasWidth, canvasHeight)
-        setWasmReady(true)
-      }
-    }
-    init()
-
-    fpsIntervalRef.current = setInterval(() => {
-      const currentFps = Math.round(wasmEngine.getFps())
-      if (Math.abs(currentFps - fpsRef.current) > 2) {
-        fpsRef.current = currentFps
-        setFps(currentFps)
-      }
-    }, 1000)
-
-    return () => {
-      mounted = false
-      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
-      if (fpsIntervalRef.current) clearInterval(fpsIntervalRef.current)
-    }
-  }, [])
+  }, [currentPageImage, webglReady])
 
   useEffect(() => {
-    if (wasmReady) {
-      wasmEngine.resize(canvasWidth, canvasHeight)
-    }
-  }, [canvasWidth, canvasHeight, wasmReady])
-
-  const strokesVersionRef = useRef(0)
-  
-  useEffect(() => {
-    if (!wasmReady) return
-    
-    strokesVersionRef.current++
-    const version = strokesVersionRef.current
-    
-    requestAnimationFrame(() => {
-      if (version !== strokesVersionRef.current) return
-      
-      const pageStrokes = getPageStrokes(currentPage)
-      const wasmStrokes = pageStrokes.map(s => ({
-        id: s.id,
-        points: s.points,
-        color: s.color,
-        thickness: s.thickness,
-        opacity: s.opacity,
-        tool: s.tool,
-        fill_color: s.fillColor || s.backgroundColor,
-      }))
-      wasmEngine.setStrokes(wasmStrokes)
-      wasmEngine.setSelectedIds(selectedStrokeIds)
-      needsRenderRef.current = true
-    })
-  }, [wasmReady, strokes, currentPage, getPageStrokes, selectedStrokeIds])
+    if (!webglReady) return
+    const pageStrokes = strokes.filter(s => s.pageId === currentPage)
+    webglRenderer.setStrokes(pageStrokes)
+    webglRenderer.setSelectedIds(selectedStrokeIds)
+  }, [webglReady, strokes, currentPage, selectedStrokeIds])
 
   useEffect(() => {
-    if (!wasmReady) return
-    
-    const style = currentStroke.length > 0 ? {
-      color: getToolSettings(activeTool).color,
-      thickness: getToolSettings(activeTool).thickness,
-      opacity: getToolSettings(activeTool).opacity,
-    } : null
-    wasmEngine.setCurrentStroke(currentStroke, style)
-    needsRenderRef.current = true
-  }, [wasmReady, currentStroke, activeTool, getToolSettings])
+    if (!webglReady) return
+    webglRenderer.setRubberBand(rubberBandStart, rubberBandEnd)
+  }, [webglReady, rubberBandStart, rubberBandEnd])
 
   useEffect(() => {
-    if (!wasmReady) return
+    if (!webglReady) return
     
     if (shapeStart && shapeEnd && isDrawing && activeTool === "shapes") {
       const settings = getToolSettings("shapes")
-      wasmEngine.setShapePreview({
-        shape_type: activeShape,
+      webglRenderer.setShapePreview({
+        type: activeShape,
         start: shapeStart,
         end: shapeEnd,
         color: settings.borderColor || settings.color,
         thickness: settings.thickness,
         opacity: settings.opacity,
-        fill_color: settings.backgroundColor !== "transparent" ? settings.backgroundColor : undefined,
+        fillColor: settings.backgroundColor !== "transparent" ? settings.backgroundColor : undefined,
       })
     } else {
-      wasmEngine.setShapePreview(null)
+      webglRenderer.setShapePreview(null)
     }
-    needsRenderRef.current = true
-  }, [wasmReady, shapeStart, shapeEnd, isDrawing, activeTool, activeShape, getToolSettings])
+  }, [webglReady, shapeStart, shapeEnd, isDrawing, activeTool, activeShape])
 
   useEffect(() => {
-    if (!wasmReady) return
+    if (!webglReady) return
     
-    if (symbolStart && symbolEnd && isDrawing && pendingSymbol) {
+    if (symbolStart && symbolEnd && isDrawing && activeTool === "text" && pendingSymbol) {
       const settings = getToolSettings("text")
-      wasmEngine.setSymbolPreview({
+      const size = Math.max(32, Math.abs(symbolEnd.x - symbolStart.x), Math.abs(symbolEnd.y - symbolStart.y))
+      webglRenderer.setSymbolPreview({
         symbol: pendingSymbol,
-        start: symbolStart,
-        end: symbolEnd,
+        position: symbolStart,
+        size: size,
         color: settings.color,
         opacity: settings.opacity,
       })
     } else {
-      wasmEngine.setSymbolPreview(null)
+      webglRenderer.setSymbolPreview(null)
     }
-    needsRenderRef.current = true
-  }, [wasmReady, symbolStart, symbolEnd, isDrawing, pendingSymbol, getToolSettings])
+  }, [webglReady, symbolStart, symbolEnd, isDrawing, activeTool, pendingSymbol])
 
-  const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null)
-  const lastPdfImageRef = useRef<HTMLImageElement | null>(null)
-  const needsRenderRef = useRef(true)
-  const isActiveRef = useRef(false)
-  
-  useEffect(() => {
-    isActiveRef.current = isDrawing || isPanning || isDragging || isResizing
-  }, [isDrawing, isPanning, isDragging, isResizing])
-  
-  useEffect(() => {
-    needsRenderRef.current = true
-  }, [strokes, selectedStrokeId, currentStroke, shapeStart, shapeEnd, symbolStart, symbolEnd])
-  
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || !wasmReady) return
-    
-    const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true })
-    if (!ctx) return
-
-    let running = true
-    
-    if (!pdfCanvasRef.current) {
-      pdfCanvasRef.current = document.createElement("canvas")
+  const handleTextSubmit = useCallback(() => {
+    if (textInput && textInput.value.trim()) {
+      const textSettings = getToolSettings("text")
+      addStroke({
+        points: [textInput.position],
+        color: textSettings.color,
+        thickness: textSettings.thickness,
+        opacity: textSettings.opacity,
+        tool: `text:${textInput.value}`,
+        pageId: currentPage,
+      })
     }
-    const pdfCanvas = pdfCanvasRef.current
-    pdfCanvas.width = canvasWidth
-    pdfCanvas.height = canvasHeight
-    const pdfCtx = pdfCanvas.getContext("2d", { alpha: false })
-    
-    if (pdfImage && pdfCtx && pdfImage !== lastPdfImageRef.current) {
-      pdfCtx.drawImage(pdfImage, 0, 0, canvasWidth, canvasHeight)
-      lastPdfImageRef.current = pdfImage
-      needsRenderRef.current = true
-    }
-    
-    let lastTime = 0
-    const targetFrameTime = 1000 / 60
-    
-    const renderLoop = (timestamp: number) => {
-      if (!running) return
-      
-      const delta = timestamp - lastTime
-      
-      if (delta >= targetFrameTime || isActiveRef.current) {
-        lastTime = timestamp
-        wasmEngine.recordFrame(timestamp)
-        
-        if (needsRenderRef.current || isActiveRef.current) {
-          if (pdfImage) {
-            ctx.drawImage(pdfCanvas, 0, 0)
-          }
-          wasmEngine.render(ctx, !!pdfImage)
-          needsRenderRef.current = false
-        }
-      }
-      
-      rafIdRef.current = requestAnimationFrame(renderLoop)
-    }
-    
-    rafIdRef.current = requestAnimationFrame(renderLoop)
-    
-    return () => {
-      running = false
-      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
-    }
-  }, [wasmReady, pdfImage, canvasWidth, canvasHeight])
+    setTextInput(null)
+  }, [textInput, currentPage, addStroke])
 
   const handleZoomIn = useCallback(() => {
     onZoomChange(Math.min(zoom + 25, 400))
@@ -413,7 +306,7 @@ export function Viewer({
     setPanOffset({ x: 0, y: 0 })
   }, [onZoomChange])
 
-  const getCanvasPoint = useCallback((e: React.MouseEvent | MouseEvent | React.PointerEvent | PointerEvent): Point => {
+  const getCanvasPoint = useCallback((e: React.PointerEvent | PointerEvent): Point => {
     const canvas = canvasRef.current
     if (!canvas) return { x: 0, y: 0 }
     const rect = canvas.getBoundingClientRect()
@@ -423,13 +316,6 @@ export function Viewer({
       y: (e.clientY - rect.top) / scale,
     }
   }, [scale])
-
-  const getPointerPressure = useCallback((e: React.PointerEvent | PointerEvent): number => {
-    if ('pressure' in e && e.pressure > 0) {
-      return e.pressure
-    }
-    return 0.5
-  }, [])
 
   const getStrokeBounds = useCallback((stroke: any): { minX: number, minY: number, maxX: number, maxY: number } | null => {
     if (!stroke || stroke.points.length < 1) return null
@@ -444,9 +330,7 @@ export function Viewer({
     } else if (stroke.tool.startsWith("text:")) {
       const text = stroke.tool.replace("text:", "")
       const fontSize = Math.max(14, stroke.thickness * 4)
-      const isMathSymbol = text.length === 1 && /[^\x00-\x7F]/.test(text)
-      const charWidth = isMathSymbol ? fontSize * 0.7 : fontSize * 0.55
-      const textWidth = Math.max(fontSize * 0.6, text.length * charWidth)
+      const textWidth = Math.max(fontSize * 0.6, text.length * fontSize * 0.55)
       return {
         minX: stroke.points[0].x - 1,
         minY: stroke.points[0].y - fontSize * 0.85,
@@ -461,41 +345,12 @@ export function Viewer({
     const pageStrokes = getPageStrokes(currentPage)
     const eraserRadius = eraserMode ? 15 : 10
     
-    if (wasmReady) {
-      const idx = wasmEngine.hitTest(point.x * scale, point.y * scale, eraserRadius)
-      if (idx >= 0 && idx < pageStrokes.length) {
-        return pageStrokes[idx].id
-      }
-      return null
-    }
-    
-    for (let i = pageStrokes.length - 1; i >= 0; i--) {
-      const stroke = pageStrokes[i]
-      
-      if (stroke.tool === "pen" || stroke.tool === "highlighter") {
-        for (const p of stroke.points) {
-          const dist = Math.sqrt((point.x - p.x) ** 2 + (point.y - p.y) ** 2)
-          if (dist <= eraserRadius + stroke.thickness / 2) {
-            return stroke.id
-          }
-        }
-      } else {
-        const bounds = getStrokeBounds(stroke)
-        if (bounds) {
-          const padding = eraserRadius
-          if (
-            point.x >= bounds.minX - padding &&
-            point.x <= bounds.maxX + padding &&
-            point.y >= bounds.minY - padding &&
-            point.y <= bounds.maxY + padding
-          ) {
-            return stroke.id
-          }
-        }
-      }
+    const idx = webglRenderer.hitTest(point.x, point.y, eraserRadius)
+    if (idx >= 0 && idx < pageStrokes.length) {
+      return pageStrokes[idx].id
     }
     return null
-  }, [getPageStrokes, currentPage, getStrokeBounds, wasmReady, scale])
+  }, [getPageStrokes, currentPage])
 
   const getResizeCorner = useCallback((point: Point, stroke: any): 'tl' | 'tr' | 'bl' | 'br' | null => {
     const bounds = getStrokeBounds(stroke)
@@ -544,20 +399,10 @@ export function Viewer({
       } else {
         const bounds = getStrokeBounds(stroke)
         if (bounds) {
-          const strokeCenterX = (bounds.minX + bounds.maxX) / 2
-          const strokeCenterY = (bounds.minY + bounds.maxY) / 2
-          
-          if (strokeCenterX >= rectMinX && strokeCenterX <= rectMaxX &&
-              strokeCenterY >= rectMinY && strokeCenterY <= rectMaxY) {
+          const overlapX = bounds.minX <= rectMaxX && bounds.maxX >= rectMinX
+          const overlapY = bounds.minY <= rectMaxY && bounds.maxY >= rectMinY
+          if (overlapX && overlapY) {
             isInside = true
-          }
-          
-          if (!isInside) {
-            const overlapX = bounds.minX <= rectMaxX && bounds.maxX >= rectMinX
-            const overlapY = bounds.minY <= rectMaxY && bounds.maxY >= rectMinY
-            if (overlapX && overlapY) {
-              isInside = true
-            }
           }
         }
       }
@@ -570,15 +415,14 @@ export function Viewer({
     return result
   }, [getPageStrokes, currentPage, getStrokeBounds])
 
-  const startDrawing = useCallback((e: React.PointerEvent | React.MouseEvent) => {
+  const startDrawing = useCallback((e: React.PointerEvent) => {
     const point = getCanvasPoint(e)
     const clientX = e.clientX
     const clientY = e.clientY
     const hasShiftKey = e.shiftKey
     
-    if ('pointerType' in e && e.pointerType === 'pen') {
+    if (e.pointerType === 'pen') {
       setCurrentPressure(e.pressure || 0.5)
-      activePointerId.current = e.pointerId
     }
 
     if (activeTool === "select") {
@@ -626,6 +470,8 @@ export function Viewer({
 
     if (activeTool === "text") {
       selectStroke(null)
+      currentStrokeRef.current = []
+      webglRenderer.setCurrentStroke([], null)
       
       if (textInput && textInput.value.trim()) {
         const textSettings = getToolSettings("text")
@@ -653,6 +499,8 @@ export function Viewer({
     }
 
     selectStroke(null)
+    currentStrokeRef.current = []
+    webglRenderer.setCurrentStroke([], null)
 
     if (activeTool === "shapes") {
       setIsDrawing(true)
@@ -675,14 +523,23 @@ export function Viewer({
     if (activeTool !== "pen" && activeTool !== "highlighter" && activeTool !== "eraser") return
 
     setIsDrawing(true)
-    setCurrentStroke([point])
-  }, [activeTool, getCanvasPoint, findStrokeAtPoint, selectStroke, getStrokeById, getResizeCorner, selectedStrokeId, textInput, pendingSymbol, onSymbolPlaced, addStroke, getToolSettings, currentPage, addToSelection, clearSelection, updateStroke])
+    currentStrokeRef.current = [point]
+    
+    if (webglReady) {
+      const settings = getToolSettings(activeTool)
+      webglRenderer.setCurrentStroke([point], {
+        color: settings.color,
+        thickness: settings.thickness,
+        opacity: settings.opacity,
+      })
+    }
+  }, [activeTool, getCanvasPoint, findStrokeAtPoint, selectStroke, getStrokeById, getResizeCorner, selectedStrokeId, textInput, pendingSymbol, addStroke, currentPage, addToSelection, clearSelection, updateStroke, webglReady])
 
-  const draw = useCallback((e: React.PointerEvent | React.MouseEvent) => {
+  const draw = useCallback((e: React.PointerEvent) => {
     const clientX = e.clientX
     const clientY = e.clientY
     
-    if ('pointerType' in e && e.pointerType === 'pen') {
+    if (e.pointerType === 'pen') {
       setCurrentPressure(e.pressure || 0.5)
     }
     
@@ -788,8 +645,23 @@ export function Viewer({
       return
     }
 
-    setCurrentStroke(prev => [...prev, point])
-  }, [isDrawing, isPanning, isDragging, isResizing, isRubberBanding, rubberBandStart, resizeCorner, lastPanPoint, getCanvasPoint, activeTool, pendingSymbol, symbolStart, selectedStrokeId, dragOffset, updateStroke, getStrokeById, findStrokeAtPoint, deleteStroke])
+    const lastPoint = currentStrokeRef.current[currentStrokeRef.current.length - 1]
+    if (lastPoint) {
+      const dist = Math.sqrt((point.x - lastPoint.x) ** 2 + (point.y - lastPoint.y) ** 2)
+      if (dist < 1.5) return
+    }
+
+    currentStrokeRef.current.push(point)
+    
+    if (webglReady) {
+      const settings = getToolSettings(activeTool)
+      webglRenderer.setCurrentStroke(currentStrokeRef.current, {
+        color: settings.color,
+        thickness: settings.thickness,
+        opacity: settings.opacity,
+      })
+    }
+  }, [isDrawing, isPanning, isDragging, isResizing, isRubberBanding, rubberBandStart, resizeCorner, lastPanPoint, getCanvasPoint, activeTool, pendingSymbol, symbolStart, selectedStrokeId, dragOffset, updateStroke, getStrokeById, findStrokeAtPoint, deleteStroke, webglReady])
 
   const stopDrawing = useCallback(() => {
     if (isRubberBanding) {
@@ -825,14 +697,22 @@ export function Viewer({
       return
     }
 
-    if (!isDrawing) {
-      return
-    }
+    if (!isDrawing) return
 
     if (activeTool === "shapes" && shapeStart && shapeEnd) {
+      const width = Math.abs(shapeEnd.x - shapeStart.x)
+      const height = Math.abs(shapeEnd.y - shapeStart.y)
+      
+      let finalStart = shapeStart
+      let finalEnd = shapeEnd
+      
+      if (width < 10 && height < 10) {
+        finalEnd = { x: shapeStart.x + 100, y: shapeStart.y + 100 }
+      }
+      
       const shapeSettings = getToolSettings("shapes")
       addStroke({
-        points: [shapeStart, shapeEnd],
+        points: [finalStart, finalEnd],
         color: shapeSettings.borderColor || shapeSettings.color,
         thickness: shapeSettings.thickness,
         opacity: shapeSettings.opacity,
@@ -843,13 +723,20 @@ export function Viewer({
       setShapeStart(null)
       setShapeEnd(null)
       setIsDrawing(false)
+      currentStrokeRef.current = []
+      webglRenderer.setCurrentStroke([], null)
+      webglRenderer.setShapePreview(null)
       return
     }
 
     if (activeTool === "text" && pendingSymbol && symbolStart && symbolEnd) {
+      const width = Math.abs(symbolEnd.x - symbolStart.x)
+      const height = Math.abs(symbolEnd.y - symbolStart.y)
+      const size = Math.max(width, height)
+      
       const textSettings = getToolSettings("text")
-      const size = Math.max(20, Math.abs(symbolEnd.x - symbolStart.x), Math.abs(symbolEnd.y - symbolStart.y))
-      const thickness = Math.max(1, Math.min(20, Math.round(size / 4)))
+      const thickness = size < 10 ? 8 : Math.max(1, Math.min(20, Math.round(size / 4)))
+      
       addStroke({
         points: [symbolStart],
         color: textSettings.color,
@@ -861,109 +748,31 @@ export function Viewer({
       setSymbolStart(null)
       setSymbolEnd(null)
       setIsDrawing(false)
+      currentStrokeRef.current = []
+      webglRenderer.setCurrentStroke([], null)
+      webglRenderer.setSymbolPreview(null)
       onSymbolPlaced?.()
       return
     }
 
-    if (currentStroke.length === 0) {
+    if (currentStrokeRef.current.length === 0) {
       setIsDrawing(false)
       return
     }
 
     if (activeTool === "eraser") {
-      setCurrentStroke([])
+      currentStrokeRef.current = []
+      webglRenderer.setCurrentStroke([], null)
       setIsDrawing(false)
       return
     }
 
     const currentToolSettings = getToolSettings(activeTool)
-    
-    // Don't simplify points to avoid visual shift when stroke is saved
-    const simplifiedPoints = currentStroke
-    
-    const pressureMultiplier = 0.5 + currentPressure
+    const pressureMultiplier = pressureSensitivity ? (0.5 + currentPressure) : 1
     const finalThickness = Math.round(currentToolSettings.thickness * pressureMultiplier)
-    
-    if (symbolRecognitionEnabled && activeTool === "pen" && currentStroke.length > 15) {
-      const strokePoints = [...currentStroke]
-      const strokeColor = currentToolSettings.color
-      const strokeOpacity = currentToolSettings.opacity
-      const strokeThickness = finalThickness
-      
-      setCurrentStroke([])
-      setIsDrawing(false)
-      
-      import('@/lib/symbol-recognizer').then(({ recognizeSymbol }) => {
-        recognizeSymbol(strokePoints).then(result => {
-          const threshold = 0.3 + (symbolRecognitionSensitivity - 0.3) * 0.7
-          
-          if (result && result.confidence >= threshold) {
-            const bounds = {
-              minX: Math.min(...strokePoints.map(p => p.x)),
-              minY: Math.min(...strokePoints.map(p => p.y)),
-              maxX: Math.max(...strokePoints.map(p => p.x)),
-              maxY: Math.max(...strokePoints.map(p => p.y))
-            }
-            const centerX = (bounds.minX + bounds.maxX) / 2
-            const centerY = (bounds.minY + bounds.maxY) / 2
-            const size = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY)
-            const symbolThickness = Math.max(1, Math.min(20, Math.round(size / 4)))
-            
-            addStroke({
-              points: [{ x: centerX - size / 2, y: centerY + size / 3 }],
-              color: strokeColor,
-              thickness: symbolThickness,
-              opacity: strokeOpacity,
-              tool: `text:${result.symbol}`,
-              pageId: currentPage,
-            })
-          } else {
-            const simplified = wasmReady && strokePoints.length > 10
-              ? wasmEngine.simplifyPoints(strokePoints, 1.5)
-              : strokePoints
-            
-            addStroke({
-              points: simplified,
-              color: strokeColor,
-              thickness: strokeThickness,
-              opacity: strokeOpacity,
-              tool: activeTool,
-              pageId: currentPage,
-            })
-          }
-        }).catch(() => {
-          const simplified = wasmReady && strokePoints.length > 10
-            ? wasmEngine.simplifyPoints(strokePoints, 1.5)
-            : strokePoints
-          
-          addStroke({
-            points: simplified,
-            color: strokeColor,
-            thickness: strokeThickness,
-            opacity: strokeOpacity,
-            tool: activeTool,
-            pageId: currentPage,
-          })
-        })
-      }).catch(() => {
-        const simplified = wasmReady && strokePoints.length > 10
-          ? wasmEngine.simplifyPoints(strokePoints, 1.5)
-          : strokePoints
-        
-        addStroke({
-          points: simplified,
-          color: strokeColor,
-          thickness: strokeThickness,
-          opacity: strokeOpacity,
-          tool: activeTool,
-          pageId: currentPage,
-        })
-      })
-      return
-    }
-    
+
     addStroke({
-      points: simplifiedPoints,
+      points: currentStrokeRef.current,
       color: currentToolSettings.color,
       thickness: finalThickness,
       opacity: currentToolSettings.opacity,
@@ -971,9 +780,10 @@ export function Viewer({
       pageId: currentPage,
     })
 
-    setCurrentStroke([])
+    currentStrokeRef.current = []
+    webglRenderer.setCurrentStroke([], null)
     setIsDrawing(false)
-  }, [isDrawing, isPanning, isDragging, isResizing, currentStroke, activeTool, getToolSettings, currentPage, addStroke, shapeStart, shapeEnd, activeShape, pendingSymbol, symbolStart, symbolEnd, onSymbolPlaced, wasmReady, symbolRecognitionEnabled, symbolRecognitionSensitivity, currentPressure, isRubberBanding, rubberBandStart, rubberBandEnd, findStrokesInRect, selectStrokes])
+  }, [isDrawing, isPanning, isDragging, isResizing, activeTool, currentPage, addStroke, shapeStart, shapeEnd, activeShape, pendingSymbol, symbolStart, symbolEnd, onSymbolPlaced, currentPressure, pressureSensitivity, isRubberBanding, rubberBandStart, rubberBandEnd, findStrokesInRect, selectStrokes])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -985,55 +795,44 @@ export function Viewer({
       
       if (isCtrl && key === "z") {
         e.preventDefault()
-        e.stopPropagation()
-        if (e.shiftKey) {
-          redo()
-        } else {
-          undo()
-        }
+        if (e.shiftKey) redo()
+        else undo()
         return
       }
       if (isCtrl && key === "y") {
         e.preventDefault()
-        e.stopPropagation()
         redo()
         return
       }
       if (isCtrl && key === "c") {
         e.preventDefault()
-        e.stopPropagation()
         copySelected()
         return
       }
       if (isCtrl && key === "x") {
         e.preventDefault()
-        e.stopPropagation()
         cutSelected()
         return
       }
       if (isCtrl && key === "v") {
         e.preventDefault()
-        e.stopPropagation()
         paste(currentPage)
         return
       }
       if (isCtrl && key === "d") {
         e.preventDefault()
-        e.stopPropagation()
         duplicateSelected(currentPage)
         return
       }
       if (key === "delete" || key === "backspace") {
         if (selectedStrokeIds.length > 0) {
           e.preventDefault()
-          e.stopPropagation()
           deleteSelectedStrokes()
         }
         return
       }
       if (isCtrl && key === "a" && activeTool === "select") {
         e.preventDefault()
-        e.stopPropagation()
         const pageStrokes = getPageStrokes(currentPage)
         selectStrokes(pageStrokes.map(s => s.id))
         return
@@ -1066,35 +865,24 @@ export function Viewer({
     return () => container.removeEventListener("wheel", handleWheel)
   }, [handleWheel])
 
-
-
-
-
   const getCursor = useCallback(() => {
-    if (isZooming === 'in') return "url('/cursors/cursor-zoom-in.svg') 10 9, zoom-in"
-    if (isZooming === 'out') return "url('/cursors/cursor-zoom-out.svg') 10 9, zoom-out"
+    if (isZooming === 'in') return "zoom-in"
+    if (isZooming === 'out') return "zoom-out"
     if (isResizing) {
       if (resizeCorner === 'tl' || resizeCorner === 'br') return "nwse-resize"
       if (resizeCorner === 'tr' || resizeCorner === 'bl') return "nesw-resize"
     }
     if (isDragging) return "move"
     switch (activeTool) {
-      case "select":
-        return selectedStrokeId ? "move" : "url('/cursors/cursor-default.svg') 2 2, auto"
-      case "pan":
-        return isPanning ? "url('/cursors/cursor-grabbing.svg') 12 12, grabbing" : "url('/cursors/cursor-grab.svg') 12 12, grab"
+      case "select": return selectedStrokeId ? "move" : "default"
+      case "pan": return isPanning ? "grabbing" : "grab"
       case "pen":
       case "highlighter":
-      case "shapes":
-        return "crosshair"
-      case "eraser":
-        return "url('/cursors/cursor-cell.svg') 12 12, cell"
-      case "text":
-        return pendingSymbol ? "crosshair" : "text"
-      case "fill":
-        return "url('/cursors/cursor-pointer.svg') 10 4, pointer"
-      default:
-        return "url('/cursors/cursor-default.svg') 2 2, auto"
+      case "shapes": return "crosshair"
+      case "eraser": return "cell"
+      case "text": return pendingSymbol ? "crosshair" : "text"
+      case "fill": return "pointer"
+      default: return "default"
     }
   }, [activeTool, isPanning, pendingSymbol, isDragging, selectedStrokeId, isResizing, resizeCorner, isZooming])
 
@@ -1105,33 +893,20 @@ export function Viewer({
           <div className="flex items-center gap-1 rounded-2xl border border-border/50 bg-background/95 px-3 py-2 shadow-xl backdrop-blur-xl dark:bg-zinc-900/95">
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 rounded-lg transition-all hover:bg-accent"
-                  onClick={handleZoomOut}
-                >
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={handleZoomOut}>
                   <ZoomOut className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Zoom Out</TooltipContent>
             </Tooltip>
 
-            <button
-              onClick={handleResetZoom}
-              className="flex min-w-[56px] items-center justify-center rounded-lg px-2 py-1 text-sm font-medium tabular-nums transition-colors hover:bg-accent"
-            >
+            <button onClick={handleResetZoom} className="flex min-w-[56px] items-center justify-center rounded-lg px-2 py-1 text-sm font-medium tabular-nums hover:bg-accent">
               {zoom}%
             </button>
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 rounded-lg transition-all hover:bg-accent"
-                  onClick={handleZoomIn}
-                >
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={handleZoomIn}>
                   <ZoomIn className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -1142,13 +917,7 @@ export function Viewer({
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 rounded-lg transition-all hover:bg-accent disabled:opacity-40"
-                  onClick={onPrevPage}
-                  disabled={currentPageIndex <= 1}
-                >
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg disabled:opacity-40" onClick={onPrevPage} disabled={currentPageIndex <= 1}>
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -1163,13 +932,7 @@ export function Viewer({
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 rounded-lg transition-all hover:bg-accent disabled:opacity-40"
-                  onClick={onNextPage}
-                  disabled={currentPageIndex >= totalPages}
-                >
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg disabled:opacity-40" onClick={onNextPage} disabled={currentPageIndex >= totalPages}>
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -1180,12 +943,7 @@ export function Viewer({
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 rounded-lg transition-all hover:bg-accent"
-                  onClick={handleResetZoom}
-                >
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={handleResetZoom}>
                   <Maximize className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -1194,12 +952,7 @@ export function Viewer({
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 rounded-lg transition-all hover:bg-accent"
-                  onClick={handleResetZoom}
-                >
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={handleResetZoom}>
                   <RotateCcw className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -1229,31 +982,20 @@ export function Viewer({
               ref={canvasRef}
               width={canvasWidth}
               height={canvasHeight}
-              className={cn(
-                "shadow-2xl transition-shadow duration-300",
-                "dark:shadow-black/50"
-              )}
+              className="shadow-2xl dark:shadow-black/50"
               style={{ cursor: getCursor() }}
             />
 
             <div className="pointer-events-none absolute -inset-4 rounded-sm border-2 border-dashed border-violet-500/20" />
 
-            {isRubberBanding && rubberBandStart && rubberBandEnd && 
-              (Math.abs(rubberBandEnd.x - rubberBandStart.x) > 5 || Math.abs(rubberBandEnd.y - rubberBandStart.y) > 5) && (
-              <div
-                className="pointer-events-none absolute rounded-sm border border-dashed border-sky-500 bg-sky-500/15"
-                style={{
-                  left: Math.min(rubberBandStart.x, rubberBandEnd.x),
-                  top: Math.min(rubberBandStart.y, rubberBandEnd.y),
-                  width: Math.abs(rubberBandEnd.x - rubberBandStart.x),
-                  height: Math.abs(rubberBandEnd.y - rubberBandStart.y),
-                }}
-              />
-            )}
-
             <div className="pointer-events-none absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs text-muted-foreground">
               {canvasWidth} × {canvasHeight} px · Page {currentPage}
-              {wasmReady && fps > 0 && <span className="ml-2 text-green-500">⚡ {fps} FPS</span>}
+              {webglReady && showFpsCounter && (
+                <span className="ml-2 text-green-500">
+                  ⚡ {fps} FPS
+                  {gpuInfo && gpuInfo !== "Unknown" && <span className="ml-1 text-violet-500">({gpuInfo.split(" - ")[1]?.split("/")[0] || "GPU"})</span>}
+                </span>
+              )}
             </div>
 
             {textInput && (
@@ -1264,12 +1006,8 @@ export function Viewer({
                 onChange={(e) => setTextInput({ ...textInput, value: e.target.value })}
                 onKeyDown={(e) => {
                   e.stopPropagation()
-                  if (e.key === "Enter") {
-                    handleTextSubmit()
-                  }
-                  if (e.key === "Escape") {
-                    setTextInput(null)
-                  }
+                  if (e.key === "Enter") handleTextSubmit()
+                  if (e.key === "Escape") setTextInput(null)
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
                 className="absolute border-0 bg-transparent outline-none caret-current"
@@ -1285,152 +1023,76 @@ export function Viewer({
               />
             )}
           </div>
-
         </div>
-
 
         {selectedStrokeIds.length > 0 && (
           <div className="absolute left-1/2 top-16 z-30 -translate-x-1/2 rounded-2xl border bg-background/95 p-2 shadow-xl backdrop-blur-xl">
             <div className="flex items-center gap-2">
               {selectedStrokeIds.length > 1 && (
-                <span className="px-2 text-xs text-muted-foreground">
-                  {selectedStrokeIds.length} selected
-                </span>
+                <span className="px-2 text-xs text-muted-foreground">{selectedStrokeIds.length} selected</span>
               )}
 
               <div className="flex items-center gap-0.5 rounded-full bg-muted p-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 rounded-full text-xs"
-                  onClick={() => copySelected()}
-                  title="Copy (Ctrl+C)"
-                >
-                  📋
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 rounded-full text-xs"
-                  onClick={() => cutSelected()}
-                  title="Cut (Ctrl+X)"
-                >
-                  ✂️
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 rounded-full text-xs"
-                  onClick={() => duplicateSelected(currentPage)}
-                  title="Duplicate (Ctrl+D)"
-                >
-                  📑
-                </Button>
+                <Button variant="ghost" size="sm" className="h-7 px-2 rounded-full text-xs" onClick={() => copySelected()}>📋</Button>
+                <Button variant="ghost" size="sm" className="h-7 px-2 rounded-full text-xs" onClick={() => cutSelected()}>✂️</Button>
+                <Button variant="ghost" size="sm" className="h-7 px-2 rounded-full text-xs" onClick={() => duplicateSelected(currentPage)}>📑</Button>
               </div>
 
               {selectedStrokeIds.length === 1 && selectedStrokeId && (
                 <>
                   <div className="h-6 w-px bg-border" />
                   <div className="flex items-center gap-0.5 rounded-full bg-muted p-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 rounded-full p-0"
-                      onClick={() => {
-                        const stroke = getStrokeById(selectedStrokeId)
-                        if (stroke) {
-                          if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x - 10, y: stroke.points[0].y }, { x: stroke.points[1].x - 10, y: stroke.points[1].y }] })
-                          } else {
-                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x - 10, y: stroke.points[0].y }] })
-                          }
+                    <Button variant="ghost" size="sm" className="h-7 w-7 rounded-full p-0" onClick={() => {
+                      const stroke = getStrokeById(selectedStrokeId)
+                      if (stroke) {
+                        if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
+                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x - 10, y: stroke.points[0].y }, { x: stroke.points[1].x - 10, y: stroke.points[1].y }] })
+                        } else {
+                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x - 10, y: stroke.points[0].y }] })
                         }
-                      }}
-                    >
-                      ←
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 rounded-full p-0"
-                      onClick={() => {
-                        const stroke = getStrokeById(selectedStrokeId)
-                        if (stroke) {
-                          if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x + 10, y: stroke.points[0].y }, { x: stroke.points[1].x + 10, y: stroke.points[1].y }] })
-                          } else {
-                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x + 10, y: stroke.points[0].y }] })
-                          }
+                      }
+                    }}>←</Button>
+                    <Button variant="ghost" size="sm" className="h-7 w-7 rounded-full p-0" onClick={() => {
+                      const stroke = getStrokeById(selectedStrokeId)
+                      if (stroke) {
+                        if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
+                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x + 10, y: stroke.points[0].y }, { x: stroke.points[1].x + 10, y: stroke.points[1].y }] })
+                        } else {
+                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x + 10, y: stroke.points[0].y }] })
                         }
-                      }}
-                    >
-                      →
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 rounded-full p-0"
-                      onClick={() => {
-                        const stroke = getStrokeById(selectedStrokeId)
-                        if (stroke) {
-                          if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y - 10 }, { x: stroke.points[1].x, y: stroke.points[1].y - 10 }] })
-                          } else {
-                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y - 10 }] })
-                          }
+                      }
+                    }}>→</Button>
+                    <Button variant="ghost" size="sm" className="h-7 w-7 rounded-full p-0" onClick={() => {
+                      const stroke = getStrokeById(selectedStrokeId)
+                      if (stroke) {
+                        if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
+                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y - 10 }, { x: stroke.points[1].x, y: stroke.points[1].y - 10 }] })
+                        } else {
+                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y - 10 }] })
                         }
-                      }}
-                    >
-                      ↑
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 rounded-full p-0"
-                      onClick={() => {
-                        const stroke = getStrokeById(selectedStrokeId)
-                        if (stroke) {
-                          if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y + 10 }, { x: stroke.points[1].x, y: stroke.points[1].y + 10 }] })
-                          } else {
-                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y + 10 }] })
-                          }
+                      }
+                    }}>↑</Button>
+                    <Button variant="ghost" size="sm" className="h-7 w-7 rounded-full p-0" onClick={() => {
+                      const stroke = getStrokeById(selectedStrokeId)
+                      if (stroke) {
+                        if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
+                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y + 10 }, { x: stroke.points[1].x, y: stroke.points[1].y + 10 }] })
+                        } else {
+                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y + 10 }] })
                         }
-                      }}
-                    >
-                      ↓
-                    </Button>
+                      }
+                    }}>↓</Button>
                   </div>
                 </>
               )}
 
               <div className="h-6 w-px bg-border" />
-
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 rounded-full p-0 text-red-500 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900"
-                onClick={() => deleteSelectedStrokes()}
-                title="Delete (Del)"
-              >
-                🗑
-              </Button>
-
+              <Button variant="ghost" size="sm" className="h-7 w-7 rounded-full p-0 text-red-500 hover:bg-red-100 dark:hover:bg-red-900" onClick={() => deleteSelectedStrokes()}>🗑</Button>
               <div className="h-6 w-px bg-border" />
-
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 rounded-full px-3 text-xs"
-                onClick={() => clearSelection()}
-                title="Deselect (Esc)"
-              >
-                ✓
-              </Button>
+              <Button variant="ghost" size="sm" className="h-7 rounded-full px-3 text-xs" onClick={() => clearSelection()}>✓</Button>
             </div>
           </div>
         )}
-
       </main>
     </TooltipProvider>
   )

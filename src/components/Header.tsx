@@ -289,7 +289,7 @@ function HeaderComponent({ onNewFile, onZoomIn, onZoomOut, onResetZoom, onFullSc
 
   return (
     <>
-      <header className="flex h-10 items-center justify-between border-b border-border/50 bg-background/95 px-2 backdrop-blur-md">
+      <header className="flex h-10 items-center justify-between border-b border-border/50 bg-background/95 px-2 backdrop-blur-md gpu-accelerated">
         <div className="flex items-center gap-1">
           <div className="flex items-center gap-1.5 pr-2 mr-1 border-r border-border/30">
             <img src="/icon.png" alt="Annotate Studio" className="h-5 w-5 rounded" />

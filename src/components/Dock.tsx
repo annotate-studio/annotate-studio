@@ -1,8 +1,10 @@
 "use client"
 
-import { useState, memo, useCallback } from "react"
+import { useState, memo, useCallback, useEffect } from "react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
+import { Slider } from "@/components/ui/slider"
 import {
   Tooltip,
   TooltipContent,
@@ -30,14 +32,23 @@ import {
   Settings2,
   Highlighter,
   Star,
-  Hexagon,
-  Pentagon,
   Diamond,
   Heart,
   Pi,
   PaintBucket,
+  Gauge,
+  Grid3X3,
+  Pencil as PenIcon,
+  Eye,
+  Save,
+  Sparkles,
+  Monitor,
+  Zap,
 } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Separator } from "@/components/ui/separator"
+import { Badge } from "@/components/ui/badge"
+import { useSettingsStore } from "@/lib/store"
 
 export type Tool = "select" | "pan" | "pen" | "highlighter" | "eraser" | "text" | "shapes" | "math" | "fill"
 export type ShapeType = "rectangle" | "circle" | "triangle" | "line" | "arrow" | "star" | "diamond" | "heart"
@@ -218,7 +229,70 @@ function DockComponent({
 }: DockProps) {
   const [shapesOpen, setShapesOpen] = useState(false)
   const [mathOpen, setMathOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [mathCategory, setMathCategory] = useState<keyof typeof mathSymbols>("basic")
+  const [settingsTab, setSettingsTab] = useState<"performance" | "canvas" | "input">("performance")
+  const [monitorHz, setMonitorHz] = useState(60)
+  
+  const {
+    targetFps, setTargetFps,
+    detectedRefreshRate, setDetectedRefreshRate,
+    antialiasing, setAntialiasing,
+    showFpsCounter, setShowFpsCounter,
+    gridEnabled, setGridEnabled,
+    gridSize, setGridSize,
+    snapToGrid, setSnapToGrid,
+    pressureSensitivity, setPressureSensitivity,
+    smoothing, setSmoothing,
+    autoSave, setAutoSave,
+    autoSaveInterval, setAutoSaveInterval,
+  } = useSettingsStore()
+
+  useEffect(() => {
+    const detectHz = async () => {
+      let hz = 60
+      
+      if (typeof window !== "undefined") {
+        const screen = window.screen as any
+        if (screen?.refreshRate) {
+          hz = screen.refreshRate
+        } else {
+          let lastTime = performance.now()
+          let frames = 0
+          let total = 0
+          
+          await new Promise<void>((resolve) => {
+            const measure = (time: number) => {
+              if (frames > 0) total += time - lastTime
+              lastTime = time
+              frames++
+              if (frames >= 60) {
+                hz = Math.round(1000 / (total / (frames - 1)))
+                resolve()
+              } else {
+                requestAnimationFrame(measure)
+              }
+            }
+            requestAnimationFrame(measure)
+          })
+        }
+      }
+      
+      const rates = [60, 75, 90, 120, 144, 165, 240, 360]
+      const closest = rates.reduce((p, c) => Math.abs(c - hz) < Math.abs(p - hz) ? c : p)
+      
+      setMonitorHz(closest)
+      setDetectedRefreshRate(closest)
+      
+      if (closest >= 120 && targetFps === 60) {
+        setTargetFps(closest)
+      }
+    }
+    
+    detectHz()
+  }, [])
+
+  const fpsOptions = [30, 60, 90, 120, 144, 165, 240, 360].filter(f => f <= monitorHz || f === 30 || f === 60)
   
   const ActiveShapeIcon = shapes.find(s => s.id === activeShape)?.icon || Square
 
@@ -234,8 +308,8 @@ function DockComponent({
 
   return (
     <TooltipProvider delayDuration={0}>
-      <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 animate-in fade-in-0 slide-in-from-bottom-4 duration-500">
-        <div className="flex items-center gap-1 rounded-2xl border border-border/40 bg-background/90 p-1.5 shadow-2xl backdrop-blur-xl dark:bg-zinc-900/90 dark:border-zinc-700/50">
+      <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 animate-in fade-in-0 slide-in-from-bottom-4 duration-500 gpu-accelerated">
+        <div className="flex items-center gap-1 rounded-2xl border border-border/40 bg-background/90 p-1.5 shadow-2xl backdrop-blur-xl dark:bg-zinc-900/90 dark:border-zinc-700/50 gpu-accelerated">
           <div className="flex items-center gap-0.5 rounded-xl bg-muted/50 p-1">
             {tools.map((tool) => (
               <ToolButton
@@ -473,20 +547,261 @@ function DockComponent({
 
           <div className="mx-1 h-8 w-px bg-border/50" />
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 rounded-xl transition-all duration-200 hover:bg-accent hover:scale-105 hover:rotate-45"
-              >
-                <Settings2 className="h-5 w-5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={12}>
-              Settings
-            </TooltipContent>
-          </Tooltip>
+          <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                      "h-10 w-10 rounded-xl transition-all duration-200 hover:bg-accent hover:scale-105",
+                      settingsOpen && "bg-accent"
+                    )}
+                  >
+                    <Settings2 className={cn(
+                      "h-5 w-5 transition-transform duration-500",
+                      settingsOpen && "rotate-180"
+                    )} />
+                  </Button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={12}>
+                Settings
+              </TooltipContent>
+            </Tooltip>
+            <PopoverContent
+              side="top"
+              sideOffset={16}
+              className="w-[380px] p-0 rounded-2xl border border-border/30 bg-background/98 backdrop-blur-xl shadow-2xl"
+              align="end"
+            >
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600">
+                    <Settings2 className="h-4 w-4 text-white" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-sm">Settings</h4>
+                    <p className="text-[10px] text-muted-foreground">Customize your experience</p>
+                  </div>
+                </div>
+                <Badge variant="outline" className="text-[10px] font-mono">v1.0.0</Badge>
+              </div>
+
+              <div className="flex border-b border-border/30">
+                {[
+                  { id: "performance", icon: Zap, label: "Performance" },
+                  { id: "canvas", icon: Grid3X3, label: "Canvas" },
+                  { id: "input", icon: PenIcon, label: "Input" },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setSettingsTab(tab.id as any)}
+                    className={cn(
+                      "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition-all",
+                      settingsTab === tab.id
+                        ? "text-violet-600 dark:text-violet-400 border-b-2 border-violet-500 bg-violet-500/5"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                    )}
+                  >
+                    <tab.icon className="h-3.5 w-3.5" />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <ScrollArea className="h-[320px]">
+                <div className="p-4 space-y-4">
+                  {settingsTab === "performance" && (
+                    <>
+                      <div className="rounded-xl bg-gradient-to-r from-violet-500/10 via-indigo-500/10 to-purple-500/10 p-4 border border-violet-500/20">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <Monitor className="h-4 w-4 text-violet-500" />
+                            <span className="text-xs font-medium">Monitor Detected</span>
+                          </div>
+                          <span className="text-lg font-bold text-violet-600 dark:text-violet-400">{monitorHz} Hz</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {monitorHz >= 120 && (
+                            <Badge className="bg-green-500/20 text-green-600 dark:text-green-400 border-green-500/30 text-[10px]">
+                              <Sparkles className="h-3 w-3 mr-1" />
+                              High Refresh Rate
+                            </Badge>
+                          )}
+                          <Badge variant="outline" className="text-[10px]">WebGL Active</Badge>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Gauge className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm font-medium">Target FPS</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {fpsOptions.map((fps) => (
+                              <button
+                                key={fps}
+                                onClick={() => setTargetFps(fps)}
+                                className={cn(
+                                  "px-2 py-1 text-xs font-medium rounded-md transition-all",
+                                  targetFps === fps
+                                    ? "bg-violet-500 text-white"
+                                    : "bg-muted hover:bg-muted/80 text-muted-foreground"
+                                )}
+                              >
+                                {fps}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <Separator />
+
+                        <div className="flex items-center justify-between py-1">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="h-4 w-4 text-muted-foreground" />
+                            <div>
+                              <span className="text-sm font-medium">Antialiasing</span>
+                              <p className="text-[10px] text-muted-foreground">Smooth edges</p>
+                            </div>
+                          </div>
+                          <Switch checked={antialiasing} onCheckedChange={setAntialiasing} />
+                        </div>
+
+                        <div className="flex items-center justify-between py-1">
+                          <div className="flex items-center gap-2">
+                            <Eye className="h-4 w-4 text-muted-foreground" />
+                            <div>
+                              <span className="text-sm font-medium">Show FPS</span>
+                              <p className="text-[10px] text-muted-foreground">Display frame rate</p>
+                            </div>
+                          </div>
+                          <Switch checked={showFpsCounter} onCheckedChange={setShowFpsCounter} />
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {settingsTab === "canvas" && (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between py-1">
+                        <div className="flex items-center gap-2">
+                          <Grid3X3 className="h-4 w-4 text-muted-foreground" />
+                          <div>
+                            <span className="text-sm font-medium">Show Grid</span>
+                            <p className="text-[10px] text-muted-foreground">Display grid lines</p>
+                          </div>
+                        </div>
+                        <Switch checked={gridEnabled} onCheckedChange={setGridEnabled} />
+                      </div>
+
+                      {gridEnabled && (
+                        <div className="pl-6 space-y-4 border-l-2 border-violet-500/30 ml-2">
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-medium">Grid Size</span>
+                              <span className="text-xs text-muted-foreground font-mono">{gridSize}px</span>
+                            </div>
+                            <Slider
+                              value={[gridSize]}
+                              onValueChange={(v) => setGridSize(v[0])}
+                              min={10}
+                              max={100}
+                              step={5}
+                              className="cursor-pointer"
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium">Snap to Grid</span>
+                            <Switch checked={snapToGrid} onCheckedChange={setSnapToGrid} />
+                          </div>
+                        </div>
+                      )}
+
+                      <Separator />
+
+                      <div className="flex items-center justify-between py-1">
+                        <div className="flex items-center gap-2">
+                          <Save className="h-4 w-4 text-muted-foreground" />
+                          <div>
+                            <span className="text-sm font-medium">Auto Save</span>
+                            <p className="text-[10px] text-muted-foreground">Save automatically</p>
+                          </div>
+                        </div>
+                        <Switch checked={autoSave} onCheckedChange={setAutoSave} />
+                      </div>
+
+                      {autoSave && (
+                        <div className="pl-6 border-l-2 border-violet-500/30 ml-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium">Interval</span>
+                            <div className="flex items-center gap-1">
+                              {[15, 30, 60, 120].map((sec) => (
+                                <button
+                                  key={sec}
+                                  onClick={() => setAutoSaveInterval(sec)}
+                                  className={cn(
+                                    "px-2 py-1 text-[10px] font-medium rounded-md transition-all",
+                                    autoSaveInterval === sec
+                                      ? "bg-violet-500 text-white"
+                                      : "bg-muted hover:bg-muted/80 text-muted-foreground"
+                                  )}
+                                >
+                                  {sec < 60 ? `${sec}s` : `${sec / 60}m`}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {settingsTab === "input" && (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between py-1">
+                        <div className="flex items-center gap-2">
+                          <PenIcon className="h-4 w-4 text-muted-foreground" />
+                          <div>
+                            <span className="text-sm font-medium">Pressure Sensitivity</span>
+                            <p className="text-[10px] text-muted-foreground">Vary stroke width</p>
+                          </div>
+                        </div>
+                        <Switch checked={pressureSensitivity} onCheckedChange={setPressureSensitivity} />
+                      </div>
+
+                      <Separator />
+
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm font-medium">Stroke Smoothing</span>
+                          </div>
+                          <span className="text-xs text-muted-foreground font-mono">{smoothing}%</span>
+                        </div>
+                        <Slider
+                          value={[smoothing]}
+                          onValueChange={(v) => setSmoothing(v[0])}
+                          min={0}
+                          max={100}
+                          step={10}
+                          className="cursor-pointer"
+                        />
+                        <p className="text-[10px] text-muted-foreground mt-2">
+                          Higher = smoother strokes, more latency
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
     </TooltipProvider>

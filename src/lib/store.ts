@@ -94,8 +94,43 @@ export const useColorStore = create<ColorStore>()(
 interface SettingsStore {
   sidebarCollapsed: boolean
   inspectorCollapsed: boolean
+  symbolRecognitionEnabled: boolean
+  symbolRecognitionSensitivity: number
+  
+  targetFps: number
+  detectedRefreshRate: number
+  antialiasing: boolean
+  showFpsCounter: boolean
+  
+  autoSave: boolean
+  autoSaveInterval: number
+  
+  gridEnabled: boolean
+  gridSize: number
+  snapToGrid: boolean
+  
+  pressureSensitivity: boolean
+  smoothing: number
+  
   setSidebarCollapsed: (collapsed: boolean) => void
   setInspectorCollapsed: (collapsed: boolean) => void
+  setSymbolRecognitionEnabled: (enabled: boolean) => void
+  setSymbolRecognitionSensitivity: (sensitivity: number) => void
+  
+  setTargetFps: (fps: number) => void
+  setDetectedRefreshRate: (rate: number) => void
+  setAntialiasing: (enabled: boolean) => void
+  setShowFpsCounter: (show: boolean) => void
+  
+  setAutoSave: (enabled: boolean) => void
+  setAutoSaveInterval: (interval: number) => void
+  
+  setGridEnabled: (enabled: boolean) => void
+  setGridSize: (size: number) => void
+  setSnapToGrid: (enabled: boolean) => void
+  
+  setPressureSensitivity: (enabled: boolean) => void
+  setSmoothing: (value: number) => void
 }
 
 export const useSettingsStore = create<SettingsStore>()(
@@ -103,8 +138,43 @@ export const useSettingsStore = create<SettingsStore>()(
     (set) => ({
       sidebarCollapsed: false,
       inspectorCollapsed: false,
-      setSidebarCollapsed: (collapsed: boolean) => set({ sidebarCollapsed: collapsed }),
-      setInspectorCollapsed: (collapsed: boolean) => set({ inspectorCollapsed: collapsed }),
+      symbolRecognitionEnabled: false,
+      symbolRecognitionSensitivity: 0.7,
+      
+      targetFps: 60,
+      detectedRefreshRate: 60,
+      antialiasing: true,
+      showFpsCounter: true,
+      
+      autoSave: true,
+      autoSaveInterval: 30,
+      
+      gridEnabled: false,
+      gridSize: 20,
+      snapToGrid: false,
+      
+      pressureSensitivity: true,
+      smoothing: 50,
+      
+      setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
+      setInspectorCollapsed: (collapsed) => set({ inspectorCollapsed: collapsed }),
+      setSymbolRecognitionEnabled: (enabled) => set({ symbolRecognitionEnabled: enabled }),
+      setSymbolRecognitionSensitivity: (sensitivity) => set({ symbolRecognitionSensitivity: sensitivity }),
+      
+      setTargetFps: (fps) => set({ targetFps: fps }),
+      setDetectedRefreshRate: (rate) => set({ detectedRefreshRate: rate }),
+      setAntialiasing: (enabled) => set({ antialiasing: enabled }),
+      setShowFpsCounter: (show) => set({ showFpsCounter: show }),
+      
+      setAutoSave: (enabled) => set({ autoSave: enabled }),
+      setAutoSaveInterval: (interval) => set({ autoSaveInterval: interval }),
+      
+      setGridEnabled: (enabled) => set({ gridEnabled: enabled }),
+      setGridSize: (size) => set({ gridSize: size }),
+      setSnapToGrid: (enabled) => set({ snapToGrid: enabled }),
+      
+      setPressureSensitivity: (enabled) => set({ pressureSensitivity: enabled }),
+      setSmoothing: (value) => set({ smoothing: value }),
     }),
     {
       name: "annotate-studio-settings",

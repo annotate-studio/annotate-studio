@@ -295,7 +295,11 @@ async fn export_to_pdf(path: String, pages: Vec<ExportPdfPage>) -> Result<(), St
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    std::env::set_var("WEBKIT_FORCE_COMPOSITING_MODE", "1");
+    
+    if cfg!(target_os = "windows") {
+        std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--enable-gpu-rasterization --enable-zero-copy --enable-features=Vulkan,UseSkiaRenderer --disable-features=UseChromeOSDirectVideoDecoder --force-gpu-mem-available-mb=1024");
+    }
 
     tauri::Builder::default()
         .manage(AppState {
