@@ -73,22 +73,6 @@ Download the latest release for your platform from [Releases](https://github.com
 
 ---
 
-## ⌨️ Keyboard Shortcuts
-
-| Tool | Shortcut | Action | Shortcut |
-|------|----------|--------|----------|
-| Select | `V` | Save | `Ctrl+S` |
-| Pan | `H` | Save As | `Ctrl+Shift+S` |
-| Pen | `P` | Undo | `Ctrl+Z` |
-| Highlighter | `M` | Redo | `Ctrl+Y` |
-| Eraser | `E` | Copy | `Ctrl+C` |
-| Text | `T` | Paste | `Ctrl+V` |
-| Rectangle | `R` | Delete | `Del` |
-| Circle | `O` | Zoom In | `Ctrl++` |
-| Line | `L` | Zoom Out | `Ctrl+-` |
-
----
-
 ## 🏗️ Tech Stack
 
 **Frontend**
@@ -144,17 +128,6 @@ cargo tauri build
 ```
 
 Output: `src-tauri/target/release/bundle/`
-
----
-
-## 📊 Performance Benchmarks
-
-| Metric | Canvas 2D | WebGL | Improvement |
-|--------|-----------|-------|-------------|
-| Rendering | 10-15 FPS | 60+ FPS | **5-10x faster** |
-| Hit Detection | O(n) | O(log n) | **100x faster** |
-| Memory Usage | High | Optimized | **50% reduction** |
-| Stroke Limit | ~1000 | ~10000+ | **10x more** |
 
 ---
 
