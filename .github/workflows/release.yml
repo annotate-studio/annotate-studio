@@ -41,17 +41,17 @@ jobs:
 Download the appropriate installer for your platform below.
 
 ### Windows
-- **NSIS Installer** (Recommended): \`Annotate-Studio_${process.env.PACKAGE_VERSION}_x64-setup.exe\`
-- **MSI Installer**: \`Annotate-Studio_${process.env.PACKAGE_VERSION}_x64_en-US.msi\`
+- **NSIS Installer** (Recommended): Annotate-Studio_${process.env.PACKAGE_VERSION}_x64-setup.exe
+- **MSI Installer**: Annotate-Studio_${process.env.PACKAGE_VERSION}_x64_en-US.msi
 
 ### macOS
-- **Apple Silicon** (M1/M2/M3): \`Annotate-Studio_${process.env.PACKAGE_VERSION}_aarch64.dmg\`
-- **Intel**: \`Annotate-Studio_${process.env.PACKAGE_VERSION}_x64.dmg\`
+- **Apple Silicon** (M1/M2/M3): Annotate-Studio_${process.env.PACKAGE_VERSION}_aarch64.dmg
+- **Intel**: Annotate-Studio_${process.env.PACKAGE_VERSION}_x64.dmg
 
 ### Linux
-- **Debian/Ubuntu**: \`annotate-studio_${process.env.PACKAGE_VERSION}_amd64.deb\`
-- **Fedora/RHEL**: \`annotate-studio-${process.env.PACKAGE_VERSION}-1.x86_64.rpm\`
-- **AppImage** (Universal): \`annotate-studio_${process.env.PACKAGE_VERSION}_amd64.AppImage\`
+- **Debian/Ubuntu**: annotate-studio_${process.env.PACKAGE_VERSION}_amd64.deb
+- **Fedora/RHEL**: annotate-studio-${process.env.PACKAGE_VERSION}-1.x86_64.rpm
+- **AppImage** (Universal): annotate-studio_${process.env.PACKAGE_VERSION}_amd64.AppImage
 
 ---
 
