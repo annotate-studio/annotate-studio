@@ -86,6 +86,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
+
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
