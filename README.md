@@ -7,7 +7,7 @@
 **High-performance PDF annotation engine built with WebGL rendering and spatial indexing**
 
 [![Release](https://img.shields.io/github/v/release/annotate-studio/annotate-studio)](https://github.com/annotate-studio/annotate-studio/releases)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://github.com/annotate-studio/annotate-studio/releases)
 
 [Download](https://github.com/annotate-studio/annotate-studio/releases) • [Documentation](#features) • [Report Bug](https://github.com/annotate-studio/annotate-studio/issues)
@@ -172,7 +172,18 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
+
+**Key Points:**
+- ✅ Free to use for personal and non-commercial purposes
+- ✅ Source code must remain open if modified
+- ✅ Network use counts as distribution (must share modifications)
+- ❌ Commercial use requires compliance with AGPL-3.0 terms
+- ❌ Cannot be relicensed under proprietary terms
+
+For commercial licensing options, please contact the authors.
+
+See the [LICENSE](LICENSE) file for full details.
 
 ---
 
