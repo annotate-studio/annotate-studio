@@ -20,12 +20,15 @@ Choose the appropriate installer for your platform:
 ### Windows
 
 **Recommended:**
+
 - `Annotate-Studio_1.0.0_x64-setup.exe` - NSIS Installer (easier installation)
 
 **Alternative:**
+
 - `Annotate-Studio_1.0.0_x64_en-US.msi` - MSI Installer (for enterprise deployment)
 
 **Installation:**
+
 1. Download the installer
 2. Run the `.exe` or `.msi` file
 3. Follow the installation wizard
@@ -36,12 +39,15 @@ Choose the appropriate installer for your platform:
 ### macOS
 
 **Apple Silicon (M1/M2/M3):**
+
 - `Annotate-Studio_1.0.0_aarch64.dmg`
 
 **Intel Macs:**
+
 - `Annotate-Studio_1.0.0_x64.dmg`
 
 **Installation:**
+
 1. Download the appropriate `.dmg` file for your Mac
 2. Open the `.dmg` file
 3. Drag Annotate Studio to Applications folder
@@ -52,6 +58,7 @@ Choose the appropriate installer for your platform:
 ### Linux
 
 **Debian/Ubuntu:**
+
 - `annotate-studio_1.0.0_amd64.deb`
 
 ```bash
@@ -59,6 +66,7 @@ sudo dpkg -i annotate-studio_1.0.0_amd64.deb
 ```
 
 **Fedora/RHEL/CentOS:**
+
 - `annotate-studio-1.0.0-1.x86_64.rpm`
 
 ```bash
@@ -66,6 +74,7 @@ sudo rpm -i annotate-studio-1.0.0-1.x86_64.rpm
 ```
 
 **Universal (All Distributions):**
+
 - `annotate-studio_1.0.0_amd64.AppImage`
 
 ```bash
@@ -96,11 +105,13 @@ chmod +x annotate-studio_1.0.0_amd64.AppImage
 ## 🔧 System Requirements
 
 ### Minimum
+
 - **OS:** Windows 10, macOS 10.13, Ubuntu 20.04
 - **RAM:** 4 GB
 - **GPU:** Any GPU with WebGL support
 
 ### Recommended
+
 - **OS:** Windows 11, macOS 12+, Ubuntu 22.04
 - **RAM:** 8 GB
 - **GPU:** Dedicated GPU for better performance
@@ -112,10 +123,10 @@ chmod +x annotate-studio_1.0.0_amd64.AppImage
 
 ## 🙏 Credits
 
-Developed by **CluvexStudio** & **ParsaDostifam**
+Developed by [**CluvexStudio**](https://github.com/CluvexStudio) & [**Taha Dostifam**](https://github.com/tahadostifam)
 
 Built with: Next.js, React, Tauri, Rust, WebGL, TypeScript
 
 ---
 
-**Full Changelog:** https://github.com/annotate-studio/annotate-studio/commits/v1.0.0
+**Full Changelog:** <https://github.com/annotate-studio/annotate-studio/commits/v1.0.0>
