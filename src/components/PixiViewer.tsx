@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useRef, useState, useEffect } from "react"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
   Tooltip,
@@ -17,8 +18,8 @@ import {
   RotateCcw,
 } from "lucide-react"
 import type { Tool, ShapeType } from "@/components/Dock"
-import { useCanvasStore, usePdfStore, useSettingsStore } from "@/lib/store"
-import { webglRenderer, type Point } from "@/lib/webgl-renderer"
+import { useCanvasStore, usePdfStore } from "@/lib/store"
+import { pixiEngine, type Point, type StrokeStyle } from "@/lib/pixi-engine"
 
 interface ToolSettings {
   color: string
@@ -28,7 +29,7 @@ interface ToolSettings {
   backgroundColor?: string
 }
 
-interface WebGLViewerProps {
+interface PixiViewerProps {
   currentPage: number
   currentPageIndex: number
   totalPages: number
@@ -45,7 +46,7 @@ interface WebGLViewerProps {
   onCanvasReady?: (canvas: HTMLCanvasElement | null) => void
 }
 
-export function WebGLViewer({
+export function PixiViewer({
   currentPage,
   currentPageIndex,
   totalPages,
@@ -59,24 +60,21 @@ export function WebGLViewer({
   pendingSymbol,
   onSymbolPlaced,
   onCanvasReady,
-}: WebGLViewerProps) {
+}: PixiViewerProps) {
   const getToolSettings = (tool: string): ToolSettings => {
     return toolSettings[tool] || toolSettings.pen
   }
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const [webglReady, setWebglReady] = useState(false)
+  const [pixiReady, setPixiReady] = useState(false)
   const [fps, setFps] = useState(0)
-  const [gpuInfo, setGpuInfo] = useState("")
 
   const [isDrawing, setIsDrawing] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
   const [panOffset, setPanOffset] = useState<Point>({ x: 0, y: 0 })
   const [lastPanPoint, setLastPanPoint] = useState<Point>({ x: 0, y: 0 })
-  const currentStrokeRef = useRef<Point[]>([])
-  const eraserPathRef = useRef<Point[]>([])
-  const processedStrokesRef = useRef<Set<string>>(new Set())
+  const [currentStroke, setCurrentStroke] = useState<Point[]>([])
   const [shapeStart, setShapeStart] = useState<Point | null>(null)
   const [shapeEnd, setShapeEnd] = useState<Point | null>(null)
   const [symbolStart, setSymbolStart] = useState<Point | null>(null)
@@ -85,7 +83,6 @@ export function WebGLViewer({
   const textInputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [dragOffset, setDragOffset] = useState<Point>({ x: 0, y: 0 })
-  const dragUpdateTimeoutRef = useRef<number | null>(null)
   const [isResizing, setIsResizing] = useState(false)
   const [resizeCorner, setResizeCorner] = useState<'tl' | 'tr' | 'bl' | 'br' | null>(null)
   const [isZooming, setIsZooming] = useState<'in' | 'out' | null>(null)
@@ -119,12 +116,6 @@ export function WebGLViewer({
   const renderedPages = usePdfStore(s => s.renderedPages)
   const setRenderedPage = usePdfStore(s => s.setRenderedPage)
 
-  const targetFps = useSettingsStore(s => s.targetFps)
-  const gridEnabled = useSettingsStore(s => s.gridEnabled)
-  const gridSize = useSettingsStore(s => s.gridSize)
-  const showFpsCounter = useSettingsStore(s => s.showFpsCounter)
-  const pressureSensitivity = useSettingsStore(s => s.pressureSensitivity)
-
   const currentPageMeta = pagesMeta.find((p) => p.pageNumber === currentPage)
   const currentPageImage = renderedPages.get(currentPage)
   const canvasWidth = currentPageMeta ? Math.round(currentPageMeta.width) : 595
@@ -138,39 +129,40 @@ export function WebGLViewer({
   useEffect(() => {
     if (!canvasRef.current) return
     
-    const success = webglRenderer.init(canvasRef.current, canvasWidth, canvasHeight)
-    if (success) {
-      setWebglReady(true)
-      setGpuInfo(webglRenderer.getGpuInfo())
+    let mounted = true
+    
+    const initPixi = async () => {
+      const success = await pixiEngine.init(canvasRef.current!, canvasWidth, canvasHeight)
+      if (mounted && success) {
+        setPixiReady(true)
+        if (!pdfPath) {
+          pixiEngine.drawGrid()
+        }
+      }
     }
+    
+    initPixi()
 
     const fpsInterval = setInterval(() => {
-      setFps(webglRenderer.getFps())
-    }, 500)
+      setFps(pixiEngine.getFps())
+    }, 1000)
 
     return () => {
+      mounted = false
       clearInterval(fpsInterval)
     }
   }, [])
 
   useEffect(() => {
-    if (webglReady) {
-      webglRenderer.resize(canvasWidth, canvasHeight)
+    if (pixiReady) {
+      pixiEngine.resize(canvasWidth, canvasHeight)
+      if (!pdfPath) {
+        pixiEngine.drawGrid()
+      } else {
+        pixiEngine.hideGrid()
+      }
     }
-  }, [canvasWidth, canvasHeight, webglReady])
-
-  useEffect(() => {
-    if (webglReady) {
-      webglRenderer.setTargetFps(targetFps)
-    }
-  }, [webglReady, targetFps])
-
-  useEffect(() => {
-    if (webglReady) {
-      webglRenderer.setGridEnabled(gridEnabled)
-      webglRenderer.setGridSize(gridSize)
-    }
-  }, [webglReady, gridEnabled, gridSize])
+  }, [canvasWidth, canvasHeight, pixiReady, pdfPath])
 
   const pdfLoadingRef = useRef(false)
   const pdfQueueRef = useRef<number[]>([])
@@ -227,30 +219,45 @@ export function WebGLViewer({
   }, [currentPage, pdfPath, currentPageMeta, pagesMeta.length, renderedPages, setRenderedPage])
 
   useEffect(() => {
-    if (webglReady) {
-      webglRenderer.setPdfImage(currentPageImage || null)
+    if (currentPageImage) {
+      if (pixiReady) {
+        pixiEngine.setPdfImage(currentPageImage)
+        pixiEngine.hideGrid()
+      }
+    } else {
+      if (pixiReady) {
+        pixiEngine.setPdfImage(null)
+        pixiEngine.drawGrid()
+      }
     }
-  }, [currentPageImage, webglReady])
+  }, [currentPageImage, pixiReady])
 
   useEffect(() => {
-    if (!webglReady) return
-    const pageStrokes = strokes.filter(s => s.pageId === currentPage)
-    webglRenderer.setStrokes(pageStrokes)
-    webglRenderer.setSelectedIds(selectedStrokeIds)
-  }, [webglReady, strokes, currentPage, selectedStrokeIds])
+    if (!pixiReady) return
+    const pageStrokes = getPageStrokes(currentPage)
+    pixiEngine.setStrokes(pageStrokes)
+    pixiEngine.setSelectedIds(selectedStrokeIds)
+  }, [pixiReady, strokes, currentPage, getPageStrokes, selectedStrokeIds])
 
   useEffect(() => {
-    if (!webglReady) return
-    webglRenderer.setRubberBand(rubberBandStart, rubberBandEnd)
-  }, [webglReady, rubberBandStart, rubberBandEnd])
+    if (!pixiReady) return
+    
+    const style: StrokeStyle | null = currentStroke.length > 0 ? {
+      color: getToolSettings(activeTool).color,
+      thickness: getToolSettings(activeTool).thickness,
+      opacity: getToolSettings(activeTool).opacity,
+    } : null
+    
+    pixiEngine.setCurrentStroke(currentStroke, style)
+  }, [pixiReady, currentStroke, activeTool])
 
   useEffect(() => {
-    if (!webglReady) return
+    if (!pixiReady) return
     
     if (shapeStart && shapeEnd && isDrawing && activeTool === "shapes") {
       const settings = getToolSettings("shapes")
-      webglRenderer.setShapePreview({
-        type: activeShape,
+      pixiEngine.setShapePreview({
+        shapeType: activeShape,
         start: shapeStart,
         end: shapeEnd,
         color: settings.borderColor || settings.color,
@@ -259,27 +266,31 @@ export function WebGLViewer({
         fillColor: settings.backgroundColor !== "transparent" ? settings.backgroundColor : undefined,
       })
     } else {
-      webglRenderer.setShapePreview(null)
+      pixiEngine.setShapePreview(null)
     }
-  }, [webglReady, shapeStart, shapeEnd, isDrawing, activeTool, activeShape])
+  }, [pixiReady, shapeStart, shapeEnd, isDrawing, activeTool, activeShape])
 
   useEffect(() => {
-    if (!webglReady) return
+    if (!pixiReady) return
     
-    if (symbolStart && symbolEnd && isDrawing && activeTool === "text" && pendingSymbol) {
+    if (symbolStart && symbolEnd && isDrawing && pendingSymbol) {
       const settings = getToolSettings("text")
-      const size = Math.max(32, Math.abs(symbolEnd.x - symbolStart.x), Math.abs(symbolEnd.y - symbolStart.y))
-      webglRenderer.setSymbolPreview({
+      pixiEngine.setSymbolPreview({
         symbol: pendingSymbol,
-        position: symbolStart,
-        size: size,
+        start: symbolStart,
+        end: symbolEnd,
         color: settings.color,
         opacity: settings.opacity,
       })
     } else {
-      webglRenderer.setSymbolPreview(null)
+      pixiEngine.setSymbolPreview(null)
     }
-  }, [webglReady, symbolStart, symbolEnd, isDrawing, activeTool, pendingSymbol])
+  }, [pixiReady, symbolStart, symbolEnd, isDrawing, pendingSymbol])
+
+  useEffect(() => {
+    if (!pixiReady) return
+    pixiEngine.setRubberBand(rubberBandStart, rubberBandEnd)
+  }, [pixiReady, rubberBandStart, rubberBandEnd])
 
   const handleTextSubmit = useCallback(() => {
     if (textInput && textInput.value.trim()) {
@@ -333,7 +344,9 @@ export function WebGLViewer({
     } else if (stroke.tool.startsWith("text:")) {
       const text = stroke.tool.replace("text:", "")
       const fontSize = Math.max(14, stroke.thickness * 4)
-      const textWidth = Math.max(fontSize * 0.6, text.length * fontSize * 0.55)
+      const isMathSymbol = text.length === 1 && /[^\x00-\x7F]/.test(text)
+      const charWidth = isMathSymbol ? fontSize * 0.7 : fontSize * 0.55
+      const textWidth = Math.max(fontSize * 0.6, text.length * charWidth)
       return {
         minX: stroke.points[0].x - 1,
         minY: stroke.points[0].y - fontSize * 0.85,
@@ -348,7 +361,7 @@ export function WebGLViewer({
     const pageStrokes = getPageStrokes(currentPage)
     const eraserRadius = eraserMode ? 15 : 10
     
-    const idx = webglRenderer.hitTest(point.x, point.y, eraserRadius)
+    const idx = pixiEngine.hitTest(point.x, point.y, pageStrokes, eraserRadius)
     if (idx >= 0 && idx < pageStrokes.length) {
       return pageStrokes[idx].id
     }
@@ -402,10 +415,20 @@ export function WebGLViewer({
       } else {
         const bounds = getStrokeBounds(stroke)
         if (bounds) {
-          const overlapX = bounds.minX <= rectMaxX && bounds.maxX >= rectMinX
-          const overlapY = bounds.minY <= rectMaxY && bounds.maxY >= rectMinY
-          if (overlapX && overlapY) {
+          const strokeCenterX = (bounds.minX + bounds.maxX) / 2
+          const strokeCenterY = (bounds.minY + bounds.maxY) / 2
+          
+          if (strokeCenterX >= rectMinX && strokeCenterX <= rectMaxX &&
+              strokeCenterY >= rectMinY && strokeCenterY <= rectMaxY) {
             isInside = true
+          }
+          
+          if (!isInside) {
+            const overlapX = bounds.minX <= rectMaxX && bounds.maxX >= rectMinX
+            const overlapY = bounds.minY <= rectMaxY && bounds.maxY >= rectMinY
+            if (overlapX && overlapY) {
+              isInside = true
+            }
           }
         }
       }
@@ -473,8 +496,6 @@ export function WebGLViewer({
 
     if (activeTool === "text") {
       selectStroke(null)
-      currentStrokeRef.current = []
-      webglRenderer.setCurrentStroke([], null)
       
       if (textInput && textInput.value.trim()) {
         const textSettings = getToolSettings("text")
@@ -502,15 +523,6 @@ export function WebGLViewer({
     }
 
     selectStroke(null)
-    currentStrokeRef.current = []
-    webglRenderer.setCurrentStroke([], null)
-
-    if (activeTool === "eraser") {
-      setIsDrawing(true)
-      eraserPathRef.current = [point]
-      processedStrokesRef.current.clear()
-      return
-    }
 
     if (activeTool === "shapes") {
       setIsDrawing(true)
@@ -530,20 +542,11 @@ export function WebGLViewer({
       return
     }
 
-    if (activeTool !== "pen" && activeTool !== "highlighter") return
+    if (activeTool !== "pen" && activeTool !== "highlighter" && activeTool !== "eraser") return
 
     setIsDrawing(true)
-    currentStrokeRef.current = [point]
-    
-    if (webglReady) {
-      const settings = getToolSettings(activeTool)
-      webglRenderer.setCurrentStroke([point], {
-        color: settings.color,
-        thickness: settings.thickness,
-        opacity: settings.opacity,
-      })
-    }
-  }, [activeTool, getCanvasPoint, findStrokeAtPoint, selectStroke, getStrokeById, getResizeCorner, selectedStrokeId, textInput, pendingSymbol, addStroke, currentPage, addToSelection, clearSelection, updateStroke, webglReady])
+    setCurrentStroke([point])
+  }, [activeTool, getCanvasPoint, findStrokeAtPoint, selectStroke, getStrokeById, getResizeCorner, selectedStrokeId, textInput, pendingSymbol, addStroke, currentPage, addToSelection, clearSelection, updateStroke])
 
   const draw = useCallback((e: React.PointerEvent) => {
     const clientX = e.clientX
@@ -588,10 +591,6 @@ export function WebGLViewer({
         }
         
         updateStroke(selectedStrokeId, { points: newPoints })
-        
-        if (webglReady) {
-          webglRenderer.markStrokeDirty(selectedStrokeId)
-        }
       } else if (stroke.tool.startsWith("text:")) {
         const fontSize = Math.max(14, stroke.thickness * 4)
         const baseY = stroke.points[0].y
@@ -607,10 +606,6 @@ export function WebGLViewer({
         const newThickness = Math.max(1, Math.min(100, Math.round(newFontSize / 4)))
         if (newThickness !== stroke.thickness) {
           updateStroke(selectedStrokeId, { thickness: newThickness })
-          
-          if (webglReady) {
-            webglRenderer.markStrokeDirty(selectedStrokeId)
-          }
         }
       }
       return
@@ -624,39 +619,20 @@ export function WebGLViewer({
       const newX = point.x - dragOffset.x
       const newY = point.y - dragOffset.y
       
-      if (dragUpdateTimeoutRef.current) {
-        clearTimeout(dragUpdateTimeoutRef.current)
-      }
-      
       if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
         const dx = newX - stroke.points[0].x
         const dy = newY - stroke.points[0].y
-        
-        const newPoints = [
-          { x: stroke.points[0].x + dx, y: stroke.points[0].y + dy },
-          { x: stroke.points[1].x + dx, y: stroke.points[1].y + dy },
-        ]
-        
-        updateStroke(selectedStrokeId, { points: newPoints })
-        
-        if (webglReady) {
-          webglRenderer.markStrokeDirty(selectedStrokeId)
-        }
+        updateStroke(selectedStrokeId, {
+          points: [
+            { x: stroke.points[0].x + dx, y: stroke.points[0].y + dy },
+            { x: stroke.points[1].x + dx, y: stroke.points[1].y + dy },
+          ],
+        })
       } else {
-        const newPoints = [{ x: newX, y: newY }]
-        updateStroke(selectedStrokeId, { points: newPoints })
-        
-        if (webglReady) {
-          webglRenderer.markStrokeDirty(selectedStrokeId)
-        }
+        updateStroke(selectedStrokeId, {
+          points: [{ x: newX, y: newY }],
+        })
       }
-      
-      dragUpdateTimeoutRef.current = window.setTimeout(() => {
-        if (webglReady) {
-          webglRenderer.rebuildSpatialIndex()
-        }
-      }, 100)
-      
       return
     }
 
@@ -675,37 +651,22 @@ export function WebGLViewer({
     }
 
     if (activeTool === "eraser") {
-      eraserPathRef.current.push(point)
-      
-      if (webglReady) {
-        const settings = getToolSettings("eraser")
-        webglRenderer.setCurrentStroke(eraserPathRef.current, {
-          color: "#ff0000",
-          thickness: settings.thickness,
-          opacity: 0.3,
-        })
+      const strokeId = findStrokeAtPoint(point, true)
+      if (strokeId) {
+        deleteStroke(strokeId)
       }
-      
       return
     }
 
-    const lastPoint = currentStrokeRef.current[currentStrokeRef.current.length - 1]
-    if (lastPoint) {
-      const dist = Math.sqrt((point.x - lastPoint.x) ** 2 + (point.y - lastPoint.y) ** 2)
-      if (dist < 1.5) return
-    }
-
-    currentStrokeRef.current.push(point)
-    
-    if (webglReady) {
-      const settings = getToolSettings(activeTool)
-      webglRenderer.setCurrentStroke(currentStrokeRef.current, {
-        color: settings.color,
-        thickness: settings.thickness,
-        opacity: settings.opacity,
-      })
-    }
-  }, [isDrawing, isPanning, isDragging, isResizing, isRubberBanding, rubberBandStart, resizeCorner, lastPanPoint, getCanvasPoint, activeTool, pendingSymbol, symbolStart, selectedStrokeId, dragOffset, updateStroke, getStrokeById, findStrokeAtPoint, deleteStroke, webglReady])
+    setCurrentStroke(prev => {
+      if (prev.length > 0) {
+        const last = prev[prev.length - 1]
+        const dist = Math.sqrt((point.x - last.x) ** 2 + (point.y - last.y) ** 2)
+        if (dist < 2) return prev
+      }
+      return [...prev, point]
+    })
+  }, [isDrawing, isPanning, isDragging, isResizing, isRubberBanding, rubberBandStart, resizeCorner, lastPanPoint, getCanvasPoint, activeTool, pendingSymbol, symbolStart, selectedStrokeId, dragOffset, updateStroke, getStrokeById, findStrokeAtPoint, deleteStroke])
 
   const stopDrawing = useCallback(() => {
     if (isRubberBanding) {
@@ -728,19 +689,11 @@ export function WebGLViewer({
     if (isResizing) {
       setIsResizing(false)
       setResizeCorner(null)
-      if (webglReady && dragUpdateTimeoutRef.current) {
-        clearTimeout(dragUpdateTimeoutRef.current)
-        webglRenderer.rebuildSpatialIndex()
-      }
       return
     }
 
     if (isDragging) {
       setIsDragging(false)
-      if (webglReady && dragUpdateTimeoutRef.current) {
-        clearTimeout(dragUpdateTimeoutRef.current)
-        webglRenderer.rebuildSpatialIndex()
-      }
       return
     }
 
@@ -752,19 +705,9 @@ export function WebGLViewer({
     if (!isDrawing) return
 
     if (activeTool === "shapes" && shapeStart && shapeEnd) {
-      const width = Math.abs(shapeEnd.x - shapeStart.x)
-      const height = Math.abs(shapeEnd.y - shapeStart.y)
-      
-      let finalStart = shapeStart
-      let finalEnd = shapeEnd
-      
-      if (width < 10 && height < 10) {
-        finalEnd = { x: shapeStart.x + 100, y: shapeStart.y + 100 }
-      }
-      
       const shapeSettings = getToolSettings("shapes")
       addStroke({
-        points: [finalStart, finalEnd],
+        points: [shapeStart, shapeEnd],
         color: shapeSettings.borderColor || shapeSettings.color,
         thickness: shapeSettings.thickness,
         opacity: shapeSettings.opacity,
@@ -775,20 +718,13 @@ export function WebGLViewer({
       setShapeStart(null)
       setShapeEnd(null)
       setIsDrawing(false)
-      currentStrokeRef.current = []
-      webglRenderer.setCurrentStroke([], null)
-      webglRenderer.setShapePreview(null)
       return
     }
 
     if (activeTool === "text" && pendingSymbol && symbolStart && symbolEnd) {
-      const width = Math.abs(symbolEnd.x - symbolStart.x)
-      const height = Math.abs(symbolEnd.y - symbolStart.y)
-      const size = Math.max(width, height)
-      
       const textSettings = getToolSettings("text")
-      const thickness = size < 10 ? 8 : Math.max(1, Math.min(20, Math.round(size / 4)))
-      
+      const size = Math.max(20, Math.abs(symbolEnd.x - symbolStart.x), Math.abs(symbolEnd.y - symbolStart.y))
+      const thickness = Math.max(1, Math.min(20, Math.round(size / 4)))
       addStroke({
         points: [symbolStart],
         color: textSettings.color,
@@ -800,135 +736,27 @@ export function WebGLViewer({
       setSymbolStart(null)
       setSymbolEnd(null)
       setIsDrawing(false)
-      currentStrokeRef.current = []
-      webglRenderer.setCurrentStroke([], null)
-      webglRenderer.setSymbolPreview(null)
       onSymbolPlaced?.()
       return
     }
 
-    if (currentStrokeRef.current.length === 0 && eraserPathRef.current.length === 0) {
+    if (currentStroke.length === 0) {
       setIsDrawing(false)
       return
     }
 
     if (activeTool === "eraser") {
-      if (eraserPathRef.current.length > 0) {
-        const eraserRadius = getToolSettings("eraser").thickness / 2
-        const pageStrokes = getPageStrokes(currentPage)
-        
-        for (const stroke of pageStrokes) {
-          if (stroke.tool !== "pen" && stroke.tool !== "highlighter") continue
-          if (processedStrokesRef.current.has(stroke.id)) continue
-          
-          const segments: Point[][] = []
-          let currentSegment: Point[] = []
-          
-          for (let i = 0; i < stroke.points.length; i++) {
-            const point = stroke.points[i]
-            let shouldErase = false
-            
-            for (let j = 0; j < eraserPathRef.current.length; j++) {
-              const eraserPoint = eraserPathRef.current[j]
-              const dx = point.x - eraserPoint.x
-              const dy = point.y - eraserPoint.y
-              const dist = Math.sqrt(dx * dx + dy * dy)
-              
-              if (dist <= eraserRadius) {
-                shouldErase = true
-                break
-              }
-              
-              if (j > 0) {
-                const prevEraserPoint = eraserPathRef.current[j - 1]
-                const ex1 = prevEraserPoint.x
-                const ey1 = prevEraserPoint.y
-                const ex2 = eraserPoint.x
-                const ey2 = eraserPoint.y
-                
-                const A = point.x - ex1
-                const B = point.y - ey1
-                const C = ex2 - ex1
-                const D = ey2 - ey1
-                
-                const dot = A * C + B * D
-                const lenSq = C * C + D * D
-                
-                let param = -1
-                if (lenSq !== 0) param = dot / lenSq
-                
-                let closestX, closestY
-                if (param < 0) {
-                  closestX = ex1
-                  closestY = ey1
-                } else if (param > 1) {
-                  closestX = ex2
-                  closestY = ey2
-                } else {
-                  closestX = ex1 + param * C
-                  closestY = ey1 + param * D
-                }
-                
-                const distToLine = Math.sqrt((point.x - closestX) ** 2 + (point.y - closestY) ** 2)
-                if (distToLine <= eraserRadius) {
-                  shouldErase = true
-                  break
-                }
-              }
-            }
-            
-            if (shouldErase) {
-              if (currentSegment.length > 1) {
-                segments.push([...currentSegment])
-              }
-              currentSegment = []
-            } else {
-              currentSegment.push(point)
-            }
-          }
-          
-          if (currentSegment.length > 1) {
-            segments.push(currentSegment)
-          }
-          
-          if (segments.length === 0) {
-            deleteStroke(stroke.id)
-          } else if (segments.length === 1 && segments[0].length === stroke.points.length) {
-            continue
-          } else {
-            deleteStroke(stroke.id)
-            
-            for (const segment of segments) {
-              if (segment.length > 1) {
-                addStroke({
-                  points: segment,
-                  color: stroke.color,
-                  thickness: stroke.thickness,
-                  opacity: stroke.opacity,
-                  tool: stroke.tool,
-                  pageId: currentPage,
-                })
-              }
-            }
-          }
-          
-          processedStrokesRef.current.add(stroke.id)
-        }
-      }
-      
-      eraserPathRef.current = []
-      processedStrokesRef.current.clear()
-      webglRenderer.setCurrentStroke([], null)
+      setCurrentStroke([])
       setIsDrawing(false)
       return
     }
 
     const currentToolSettings = getToolSettings(activeTool)
-    const pressureMultiplier = pressureSensitivity ? (0.5 + currentPressure) : 1
+    const pressureMultiplier = 0.5 + currentPressure
     const finalThickness = Math.round(currentToolSettings.thickness * pressureMultiplier)
 
     addStroke({
-      points: currentStrokeRef.current,
+      points: currentStroke,
       color: currentToolSettings.color,
       thickness: finalThickness,
       opacity: currentToolSettings.opacity,
@@ -936,10 +764,9 @@ export function WebGLViewer({
       pageId: currentPage,
     })
 
-    currentStrokeRef.current = []
-    webglRenderer.setCurrentStroke([], null)
+    setCurrentStroke([])
     setIsDrawing(false)
-  }, [isDrawing, isPanning, isDragging, isResizing, activeTool, currentPage, addStroke, shapeStart, shapeEnd, activeShape, pendingSymbol, symbolStart, symbolEnd, onSymbolPlaced, currentPressure, pressureSensitivity, isRubberBanding, rubberBandStart, rubberBandEnd, findStrokesInRect, selectStrokes])
+  }, [isDrawing, isPanning, isDragging, isResizing, currentStroke, activeTool, currentPage, addStroke, shapeStart, shapeEnd, activeShape, pendingSymbol, symbolStart, symbolEnd, onSymbolPlaced, currentPressure, isRubberBanding, rubberBandStart, rubberBandEnd, findStrokesInRect, selectStrokes])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -951,44 +778,55 @@ export function WebGLViewer({
       
       if (isCtrl && key === "z") {
         e.preventDefault()
-        if (e.shiftKey) redo()
-        else undo()
+        e.stopPropagation()
+        if (e.shiftKey) {
+          redo()
+        } else {
+          undo()
+        }
         return
       }
       if (isCtrl && key === "y") {
         e.preventDefault()
+        e.stopPropagation()
         redo()
         return
       }
       if (isCtrl && key === "c") {
         e.preventDefault()
+        e.stopPropagation()
         copySelected()
         return
       }
       if (isCtrl && key === "x") {
         e.preventDefault()
+        e.stopPropagation()
         cutSelected()
         return
       }
       if (isCtrl && key === "v") {
         e.preventDefault()
+        e.stopPropagation()
         paste(currentPage)
         return
       }
       if (isCtrl && key === "d") {
         e.preventDefault()
+        e.stopPropagation()
         duplicateSelected(currentPage)
         return
       }
       if (key === "delete" || key === "backspace") {
         if (selectedStrokeIds.length > 0) {
           e.preventDefault()
+          e.stopPropagation()
           deleteSelectedStrokes()
         }
         return
       }
       if (isCtrl && key === "a" && activeTool === "select") {
         e.preventDefault()
+        e.stopPropagation()
         const pageStrokes = getPageStrokes(currentPage)
         selectStrokes(pageStrokes.map(s => s.id))
         return
@@ -1022,26 +860,32 @@ export function WebGLViewer({
   }, [handleWheel])
 
   const getCursor = useCallback(() => {
-    if (isZooming === 'in') return "url('/cursors/cursor-zoom-in.svg') 10 9, zoom-in"
-    if (isZooming === 'out') return "url('/cursors/cursor-zoom-out.svg') 10 9, zoom-out"
+    if (isZooming === 'in') return "zoom-in"
+    if (isZooming === 'out') return "zoom-out"
     if (isResizing) {
       if (resizeCorner === 'tl' || resizeCorner === 'br') return "nwse-resize"
       if (resizeCorner === 'tr' || resizeCorner === 'bl') return "nesw-resize"
     }
     if (isDragging) return "move"
-    if (isRubberBanding) return "crosshair"
     switch (activeTool) {
-      case "select": return selectedStrokeId ? "move" : "url('/cursors/cursor-default.svg') 2 2, auto"
-      case "pan": return isPanning ? "url('/cursors/cursor-grabbing.svg') 12 12, grabbing" : "url('/cursors/cursor-grab.svg') 12 12, grab"
+      case "select":
+        return selectedStrokeId ? "move" : "default"
+      case "pan":
+        return isPanning ? "grabbing" : "grab"
       case "pen":
       case "highlighter":
-      case "shapes": return "crosshair"
-      case "eraser": return "url('/cursors/cursor-cell.svg') 12 12, cell"
-      case "text": return pendingSymbol ? "crosshair" : "text"
-      case "fill": return "url('/cursors/cursor-pointer.svg') 10 4, pointer"
-      default: return "url('/cursors/cursor-default.svg') 2 2, auto"
+      case "shapes":
+        return "crosshair"
+      case "eraser":
+        return "cell"
+      case "text":
+        return pendingSymbol ? "crosshair" : "text"
+      case "fill":
+        return "pointer"
+      default:
+        return "default"
     }
-  }, [activeTool, isPanning, pendingSymbol, isDragging, selectedStrokeId, isResizing, resizeCorner, isZooming, isRubberBanding])
+  }, [activeTool, isPanning, pendingSymbol, isDragging, selectedStrokeId, isResizing, resizeCorner, isZooming])
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -1050,20 +894,33 @@ export function WebGLViewer({
           <div className="flex items-center gap-1 rounded-2xl border border-border/50 bg-background/95 px-3 py-2 shadow-xl backdrop-blur-xl dark:bg-zinc-900/95">
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={handleZoomOut}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-lg transition-all hover:bg-accent"
+                  onClick={handleZoomOut}
+                >
                   <ZoomOut className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Zoom Out</TooltipContent>
             </Tooltip>
 
-            <button onClick={handleResetZoom} className="flex min-w-[56px] items-center justify-center rounded-lg px-2 py-1 text-sm font-medium tabular-nums hover:bg-accent">
+            <button
+              onClick={handleResetZoom}
+              className="flex min-w-[56px] items-center justify-center rounded-lg px-2 py-1 text-sm font-medium tabular-nums transition-colors hover:bg-accent"
+            >
               {zoom}%
             </button>
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={handleZoomIn}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-lg transition-all hover:bg-accent"
+                  onClick={handleZoomIn}
+                >
                   <ZoomIn className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -1074,7 +931,13 @@ export function WebGLViewer({
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg disabled:opacity-40" onClick={onPrevPage} disabled={currentPageIndex <= 1}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-lg transition-all hover:bg-accent disabled:opacity-40"
+                  onClick={onPrevPage}
+                  disabled={currentPageIndex <= 1}
+                >
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -1089,7 +952,13 @@ export function WebGLViewer({
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg disabled:opacity-40" onClick={onNextPage} disabled={currentPageIndex >= totalPages}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-lg transition-all hover:bg-accent disabled:opacity-40"
+                  onClick={onNextPage}
+                  disabled={currentPageIndex >= totalPages}
+                >
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -1100,7 +969,12 @@ export function WebGLViewer({
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={handleResetZoom}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-lg transition-all hover:bg-accent"
+                  onClick={handleResetZoom}
+                >
                   <Maximize className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -1109,7 +983,12 @@ export function WebGLViewer({
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={handleResetZoom}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-lg transition-all hover:bg-accent"
+                  onClick={handleResetZoom}
+                >
                   <RotateCcw className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -1139,7 +1018,10 @@ export function WebGLViewer({
               ref={canvasRef}
               width={canvasWidth}
               height={canvasHeight}
-              className="shadow-2xl dark:shadow-black/50"
+              className={cn(
+                "shadow-2xl transition-shadow duration-300",
+                "dark:shadow-black/50"
+              )}
               style={{ cursor: getCursor() }}
             />
 
@@ -1147,12 +1029,7 @@ export function WebGLViewer({
 
             <div className="pointer-events-none absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs text-muted-foreground">
               {canvasWidth} × {canvasHeight} px · Page {currentPage}
-              {webglReady && showFpsCounter && (
-                <span className="ml-2 text-green-500">
-                  ⚡ {fps} FPS
-                  {gpuInfo && gpuInfo !== "Unknown" && <span className="ml-1 text-violet-500">({gpuInfo.split(" - ")[1]?.split("/")[0] || "GPU"})</span>}
-                </span>
-              )}
+              {pixiReady && fps > 0 && <span className="ml-2 text-green-500">⚡ {fps} FPS (WebGL)</span>}
             </div>
 
             {textInput && (
@@ -1163,8 +1040,12 @@ export function WebGLViewer({
                 onChange={(e) => setTextInput({ ...textInput, value: e.target.value })}
                 onKeyDown={(e) => {
                   e.stopPropagation()
-                  if (e.key === "Enter") handleTextSubmit()
-                  if (e.key === "Escape") setTextInput(null)
+                  if (e.key === "Enter") {
+                    handleTextSubmit()
+                  }
+                  if (e.key === "Escape") {
+                    setTextInput(null)
+                  }
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
                 className="absolute border-0 bg-transparent outline-none caret-current"
@@ -1186,67 +1067,140 @@ export function WebGLViewer({
           <div className="absolute left-1/2 top-16 z-30 -translate-x-1/2 rounded-2xl border bg-background/95 p-2 shadow-xl backdrop-blur-xl">
             <div className="flex items-center gap-2">
               {selectedStrokeIds.length > 1 && (
-                <span className="px-2 text-xs text-muted-foreground">{selectedStrokeIds.length} selected</span>
+                <span className="px-2 text-xs text-muted-foreground">
+                  {selectedStrokeIds.length} selected
+                </span>
               )}
 
               <div className="flex items-center gap-0.5 rounded-full bg-muted p-1">
-                <Button variant="ghost" size="sm" className="h-7 px-2 rounded-full text-xs" onClick={() => copySelected()}>📋</Button>
-                <Button variant="ghost" size="sm" className="h-7 px-2 rounded-full text-xs" onClick={() => cutSelected()}>✂️</Button>
-                <Button variant="ghost" size="sm" className="h-7 px-2 rounded-full text-xs" onClick={() => duplicateSelected(currentPage)}>📑</Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 rounded-full text-xs"
+                  onClick={() => copySelected()}
+                  title="Copy (Ctrl+C)"
+                >
+                  📋
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 rounded-full text-xs"
+                  onClick={() => cutSelected()}
+                  title="Cut (Ctrl+X)"
+                >
+                  ✂️
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 rounded-full text-xs"
+                  onClick={() => duplicateSelected(currentPage)}
+                  title="Duplicate (Ctrl+D)"
+                >
+                  📑
+                </Button>
               </div>
 
               {selectedStrokeIds.length === 1 && selectedStrokeId && (
                 <>
                   <div className="h-6 w-px bg-border" />
                   <div className="flex items-center gap-0.5 rounded-full bg-muted p-1">
-                    <Button variant="ghost" size="sm" className="h-7 w-7 rounded-full p-0" onClick={() => {
-                      const stroke = getStrokeById(selectedStrokeId)
-                      if (stroke) {
-                        if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x - 10, y: stroke.points[0].y }, { x: stroke.points[1].x - 10, y: stroke.points[1].y }] })
-                        } else {
-                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x - 10, y: stroke.points[0].y }] })
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 rounded-full p-0"
+                      onClick={() => {
+                        const stroke = getStrokeById(selectedStrokeId)
+                        if (stroke) {
+                          if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x - 10, y: stroke.points[0].y }, { x: stroke.points[1].x - 10, y: stroke.points[1].y }] })
+                          } else {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x - 10, y: stroke.points[0].y }] })
+                          }
                         }
-                      }
-                    }}>←</Button>
-                    <Button variant="ghost" size="sm" className="h-7 w-7 rounded-full p-0" onClick={() => {
-                      const stroke = getStrokeById(selectedStrokeId)
-                      if (stroke) {
-                        if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x + 10, y: stroke.points[0].y }, { x: stroke.points[1].x + 10, y: stroke.points[1].y }] })
-                        } else {
-                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x + 10, y: stroke.points[0].y }] })
+                      }}
+                    >
+                      ←
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 rounded-full p-0"
+                      onClick={() => {
+                        const stroke = getStrokeById(selectedStrokeId)
+                        if (stroke) {
+                          if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x + 10, y: stroke.points[0].y }, { x: stroke.points[1].x + 10, y: stroke.points[1].y }] })
+                          } else {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x + 10, y: stroke.points[0].y }] })
+                          }
                         }
-                      }
-                    }}>→</Button>
-                    <Button variant="ghost" size="sm" className="h-7 w-7 rounded-full p-0" onClick={() => {
-                      const stroke = getStrokeById(selectedStrokeId)
-                      if (stroke) {
-                        if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y - 10 }, { x: stroke.points[1].x, y: stroke.points[1].y - 10 }] })
-                        } else {
-                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y - 10 }] })
+                      }}
+                    >
+                      →
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 rounded-full p-0"
+                      onClick={() => {
+                        const stroke = getStrokeById(selectedStrokeId)
+                        if (stroke) {
+                          if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y - 10 }, { x: stroke.points[1].x, y: stroke.points[1].y - 10 }] })
+                          } else {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y - 10 }] })
+                          }
                         }
-                      }
-                    }}>↑</Button>
-                    <Button variant="ghost" size="sm" className="h-7 w-7 rounded-full p-0" onClick={() => {
-                      const stroke = getStrokeById(selectedStrokeId)
-                      if (stroke) {
-                        if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y + 10 }, { x: stroke.points[1].x, y: stroke.points[1].y + 10 }] })
-                        } else {
-                          updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y + 10 }] })
+                      }}
+                    >
+                      ↑
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 rounded-full p-0"
+                      onClick={() => {
+                        const stroke = getStrokeById(selectedStrokeId)
+                        if (stroke) {
+                          if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y + 10 }, { x: stroke.points[1].x, y: stroke.points[1].y + 10 }] })
+                          } else {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y + 10 }] })
+                          }
                         }
-                      }
-                    }}>↓</Button>
+                      }}
+                    >
+                      ↓
+                    </Button>
                   </div>
                 </>
               )}
 
               <div className="h-6 w-px bg-border" />
-              <Button variant="ghost" size="sm" className="h-7 w-7 rounded-full p-0 text-red-500 hover:bg-red-100 dark:hover:bg-red-900" onClick={() => deleteSelectedStrokes()}>🗑</Button>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 rounded-full p-0 text-red-500 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900"
+                onClick={() => deleteSelectedStrokes()}
+                title="Delete (Del)"
+              >
+                🗑
+              </Button>
+
               <div className="h-6 w-px bg-border" />
-              <Button variant="ghost" size="sm" className="h-7 rounded-full px-3 text-xs" onClick={() => clearSelection()}>✓</Button>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 rounded-full px-3 text-xs"
+                onClick={() => clearSelection()}
+                title="Deselect (Esc)"
+              >
+                ✓
+              </Button>
             </div>
           </div>
         )}

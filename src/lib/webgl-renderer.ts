@@ -1,5 +1,7 @@
 "use client"
 
+import { SpatialIndex, type Bounds, type IndexedItem } from "./spatial-index"
+
 export interface Point {
   x: number
   y: number
@@ -15,13 +17,20 @@ export interface Stroke {
   pageId: number
   fillColor?: string
   backgroundColor?: string
+  timestamp?: number
 }
 
 interface StrokeBuffer {
-  vertexBuffer: WebGLBuffer
+  buffer: WebGLBuffer
   vertexCount: number
-  color: Float32Array
-  opacity: number
+  lastUpdate: number
+}
+
+interface TextureCache {
+  texture: WebGLTexture
+  width: number
+  height: number
+  lastUpdate: number
 }
 
 const VERTEX_SHADER = `
@@ -68,8 +77,8 @@ class WebGLRenderer {
   private lineProgram: WebGLProgram | null = null
   private width: number = 800
   private height: number = 600
-  private strokeBuffers: Map<string, StrokeBuffer> = new Map()
-  private currentStrokeBuffer: StrokeBuffer | null = null
+  private strokeBufferCache: Map<string, StrokeBuffer> = new Map()
+  private textTextureCache: Map<string, TextureCache> = new Map()
   private pdfTexture: WebGLTexture | null = null
   private pdfProgram: WebGLProgram | null = null
   private gridBuffer: WebGLBuffer | null = null
@@ -79,6 +88,7 @@ class WebGLRenderer {
   private fps: number = 0
   private animationId: number = 0
   private needsRender: boolean = true
+  private needsFullRender: boolean = true
   private initialized: boolean = false
   private targetFps: number = 60
   private lastRenderTime: number = 0
@@ -92,8 +102,14 @@ class WebGLRenderer {
   private shapePreview: { type: string; start: Point; end: Point; color: string; thickness: number; opacity: number; fillColor?: string } | null = null
   private symbolPreview: { symbol: string; position: Point; size: number; color: string; opacity: number } | null = null
   private rubberBand: { start: Point; end: Point } | null = null
+  private eraserPath: { points: Point[]; radius: number } | null = null
   private hasPdf: boolean = false
   private gpuInfo: string = "Unknown"
+  
+  private spatialIndex!: SpatialIndex
+  private dirtyStrokes: Set<string> = new Set()
+  private textCanvas: HTMLCanvasElement | null = null
+  private textCtx: CanvasRenderingContext2D | null = null
 
   init(canvas: HTMLCanvasElement, width: number, height: number): boolean {
     if (this.initialized && this.gl) {
@@ -104,6 +120,8 @@ class WebGLRenderer {
     this.canvas = canvas
     this.width = width
     this.height = height
+    
+    this.spatialIndex = new SpatialIndex({ minX: 0, minY: 0, maxX: width, maxY: height })
 
     const gl = canvas.getContext("webgl2", {
       alpha: false,
@@ -248,7 +266,10 @@ class WebGLRenderer {
     this.canvas.height = height
     this.gl.viewport(0, 0, width, height)
     this.createGridBuffer()
+    this.spatialIndex = new SpatialIndex({ minX: 0, minY: 0, maxX: width, maxY: height })
+    this.rebuildSpatialIndex()
     this.needsRender = true
+    this.needsFullRender = true
   }
 
   private startRenderLoop(): void {
@@ -326,6 +347,7 @@ class WebGLRenderer {
     this.renderSymbolPreview()
     this.renderSelection()
     this.renderRubberBand()
+    this.renderEraserPath()
   }
 
   private renderGrid(): void {
@@ -408,11 +430,34 @@ class WebGLRenderer {
     const gl = this.gl!
     if (!this.program) return
 
-    const vertices = this.createLineVertices(stroke.points, stroke.thickness)
+    let cached = this.strokeBufferCache.get(stroke.id)
+    const strokeTime = stroke.timestamp || 0
     
-    const buffer = gl.createBuffer()
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STREAM_DRAW)
+    if (!cached || strokeTime > cached.lastUpdate || this.dirtyStrokes.has(stroke.id)) {
+      const vertices = this.createLineVertices(stroke.points, stroke.thickness)
+      
+      if (cached) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, cached.buffer)
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW)
+        cached.vertexCount = vertices.length / 2
+        cached.lastUpdate = strokeTime
+      } else {
+        const buffer = gl.createBuffer()!
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW)
+        
+        cached = {
+          buffer,
+          vertexCount: vertices.length / 2,
+          lastUpdate: strokeTime
+        }
+        this.strokeBufferCache.set(stroke.id, cached)
+      }
+      
+      this.dirtyStrokes.delete(stroke.id)
+    } else {
+      gl.bindBuffer(gl.ARRAY_BUFFER, cached.buffer)
+    }
 
     gl.useProgram(this.program)
     
@@ -435,11 +480,10 @@ class WebGLRenderer {
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, vertices.length / 2)
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, cached.vertexCount)
 
     gl.disable(gl.BLEND)
     gl.disableVertexAttribArray(posLoc)
-    gl.deleteBuffer(buffer)
   }
 
   private createLineVertices(points: Point[], thickness: number): number[] {
@@ -643,55 +687,76 @@ class WebGLRenderer {
     return vertices
   }
 
-  private textCanvas: HTMLCanvasElement | null = null
-  private textCtx: CanvasRenderingContext2D | null = null
-
   private renderText(stroke: Stroke): void {
     if (stroke.points.length === 0) return
     
     const text = stroke.tool.replace("text:", "")
     const fontSize = Math.max(14, stroke.thickness * 4)
-    
-    if (!this.textCanvas) {
-      this.textCanvas = document.createElement("canvas")
-      this.textCtx = this.textCanvas.getContext("2d")
-    }
-    
-    const ctx = this.textCtx
-    if (!ctx) return
-    
-    ctx.font = `${fontSize}px Inter, system-ui, sans-serif`
-    const metrics = ctx.measureText(text)
-    const textWidth = Math.ceil(metrics.width) + 4
-    const textHeight = Math.ceil(fontSize * 1.2)
-    
-    this.textCanvas.width = textWidth
-    this.textCanvas.height = textHeight
-    
-    ctx.clearRect(0, 0, textWidth, textHeight)
-    ctx.font = `${fontSize}px Inter, system-ui, sans-serif`
-    ctx.fillStyle = stroke.color
-    ctx.globalAlpha = stroke.opacity / 100
-    ctx.textBaseline = "top"
-    ctx.fillText(text, 0, 0)
+    const cacheKey = `${stroke.id}-${text}-${fontSize}-${stroke.color}-${stroke.opacity}`
     
     const gl = this.gl!
-    const texture = gl.createTexture()
-    gl.bindTexture(gl.TEXTURE_2D, texture)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.textCanvas)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    let cached = this.textTextureCache.get(cacheKey)
+    const strokeTime = stroke.timestamp || 0
+    
+    if (!cached || strokeTime > cached.lastUpdate) {
+      if (!this.textCanvas) {
+        this.textCanvas = document.createElement("canvas")
+        this.textCtx = this.textCanvas.getContext("2d")
+      }
+      
+      const ctx = this.textCtx
+      if (!ctx) return
+      
+      ctx.font = `${fontSize}px Inter, system-ui, sans-serif`
+      const metrics = ctx.measureText(text)
+      const textWidth = Math.ceil(metrics.width) + 4
+      const textHeight = Math.ceil(fontSize * 1.2)
+      
+      this.textCanvas.width = textWidth
+      this.textCanvas.height = textHeight
+      
+      ctx.clearRect(0, 0, textWidth, textHeight)
+      ctx.font = `${fontSize}px Inter, system-ui, sans-serif`
+      ctx.fillStyle = stroke.color
+      ctx.globalAlpha = stroke.opacity / 100
+      ctx.textBaseline = "top"
+      ctx.fillText(text, 0, 0)
+      
+      if (cached) {
+        gl.bindTexture(gl.TEXTURE_2D, cached.texture)
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.textCanvas)
+        cached.width = textWidth
+        cached.height = textHeight
+        cached.lastUpdate = strokeTime
+      } else {
+        const texture = gl.createTexture()!
+        gl.bindTexture(gl.TEXTURE_2D, texture)
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.textCanvas)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+        
+        cached = {
+          texture,
+          width: textWidth,
+          height: textHeight,
+          lastUpdate: strokeTime
+        }
+        this.textTextureCache.set(cacheKey, cached)
+      }
+    } else {
+      gl.bindTexture(gl.TEXTURE_2D, cached.texture)
+    }
 
     const x = stroke.points[0].x
     const y = stroke.points[0].y - fontSize * 0.85
 
     const vertices = new Float32Array([
       x, y, 0, 0,
-      x + textWidth, y, 1, 0,
-      x, y + textHeight, 0, 1,
-      x + textWidth, y + textHeight, 1, 1,
+      x + cached.width, y, 1, 0,
+      x, y + cached.height, 0, 1,
+      x + cached.width, y + cached.height, 1, 1,
     ])
 
     const buffer = gl.createBuffer()
@@ -715,7 +780,6 @@ class WebGLRenderer {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 
     gl.activeTexture(gl.TEXTURE0)
-    gl.bindTexture(gl.TEXTURE_2D, texture)
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
 
@@ -723,7 +787,6 @@ class WebGLRenderer {
     gl.disableVertexAttribArray(posLoc)
     gl.disableVertexAttribArray(texLoc)
     gl.deleteBuffer(buffer)
-    gl.deleteTexture(texture)
   }
 
   private renderCurrentStroke(): void {
@@ -1011,7 +1074,52 @@ class WebGLRenderer {
   }
 
   setStrokes(strokes: Stroke[]): void {
+    const oldStrokesMap = new Map(this.pendingStrokes.map(s => [s.id, s]))
+    
+    for (const stroke of strokes) {
+      const oldStroke = oldStrokesMap.get(stroke.id)
+      if (oldStroke) {
+        if (stroke.points !== oldStroke.points || 
+            stroke.color !== oldStroke.color || 
+            stroke.thickness !== oldStroke.thickness ||
+            stroke.opacity !== oldStroke.opacity) {
+          this.dirtyStrokes.add(stroke.id)
+        }
+      } else {
+        this.dirtyStrokes.add(stroke.id)
+      }
+    }
+    
     this.pendingStrokes = strokes
+    this.needsRender = true
+    this.rebuildSpatialIndex()
+  }
+
+  rebuildSpatialIndex(): void {
+    const items: IndexedItem[] = []
+    
+    for (const stroke of this.pendingStrokes) {
+      const bounds = this.getStrokeBounds(stroke)
+      if (bounds) {
+        items.push({
+          id: stroke.id,
+          bounds
+        })
+      }
+    }
+    
+    this.spatialIndex.rebuild(items)
+  }
+  
+  markStrokeDirty(strokeId: string): void {
+    this.dirtyStrokes.add(strokeId)
+    this.needsRender = true
+  }
+  
+  markStrokesDirty(strokeIds: string[]): void {
+    for (const id of strokeIds) {
+      this.dirtyStrokes.add(id)
+    }
     this.needsRender = true
   }
 
@@ -1043,6 +1151,69 @@ class WebGLRenderer {
       this.rubberBand = null
     }
     this.needsRender = true
+  }
+  
+  setEraserPath(points: Point[] | null, radius?: number): void {
+    if (points && points.length > 0 && radius) {
+      this.eraserPath = { points, radius }
+    } else {
+      this.eraserPath = null
+    }
+    this.needsRender = true
+  }
+  
+  private renderEraserPath(): void {
+    if (!this.eraserPath || this.eraserPath.points.length === 0) return
+    
+    const gl = this.gl!
+    if (!this.program) return
+
+    const { points, radius } = this.eraserPath
+    
+    for (const point of points) {
+      const segments = 16
+      const vertices: number[] = []
+      
+      for (let i = 0; i <= segments; i++) {
+        const angle = (i / segments) * Math.PI * 2
+        vertices.push(
+          point.x + Math.cos(angle) * radius,
+          point.y + Math.sin(angle) * radius
+        )
+      }
+
+      const buffer = gl.createBuffer()
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STREAM_DRAW)
+
+      gl.useProgram(this.program)
+      
+      const posLoc = gl.getAttribLocation(this.program, "a_position")
+      const resLoc = gl.getUniformLocation(this.program, "u_resolution")
+      const transLoc = gl.getUniformLocation(this.program, "u_translation")
+      const scaleLoc = gl.getUniformLocation(this.program, "u_scale")
+      const colorLoc = gl.getUniformLocation(this.program, "u_color")
+
+      gl.enableVertexAttribArray(posLoc)
+      gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0)
+
+      gl.uniform2f(resLoc, this.width, this.height)
+      gl.uniform2f(transLoc, 0, 0)
+      gl.uniform1f(scaleLoc, 1)
+
+      gl.enable(gl.BLEND)
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+
+      gl.uniform4f(colorLoc, 1, 0.3, 0.3, 0.3)
+      gl.drawArrays(gl.TRIANGLE_FAN, 0, vertices.length / 2)
+
+      gl.uniform4f(colorLoc, 1, 0, 0, 0.8)
+      gl.drawArrays(gl.LINE_LOOP, 0, vertices.length / 2)
+
+      gl.disable(gl.BLEND)
+      gl.disableVertexAttribArray(posLoc)
+      gl.deleteBuffer(buffer)
+    }
   }
 
   setPdfImage(imageDataUrl: string | null): void {
@@ -1082,8 +1253,18 @@ class WebGLRenderer {
   }
 
   hitTest(x: number, y: number, radius: number = 10): number {
+    const candidateIds = this.spatialIndex.queryPoint(x, y, radius)
+    
+    if (candidateIds.length === 0) {
+      return -1
+    }
+    
     for (let i = this.pendingStrokes.length - 1; i >= 0; i--) {
       const stroke = this.pendingStrokes[i]
+      
+      if (!candidateIds.includes(stroke.id)) {
+        continue
+      }
       
       if (stroke.tool === "pen" || stroke.tool === "highlighter") {
         for (const p of stroke.points) {
@@ -1120,8 +1301,20 @@ class WebGLRenderer {
       if (this.program) this.gl.deleteProgram(this.program)
       if (this.lineProgram) this.gl.deleteProgram(this.lineProgram)
       if (this.pdfProgram) this.gl.deleteProgram(this.pdfProgram)
+      
+      for (const cached of this.strokeBufferCache.values()) {
+        this.gl.deleteBuffer(cached.buffer)
+      }
+      this.strokeBufferCache.clear()
+      
+      for (const cached of this.textTextureCache.values()) {
+        this.gl.deleteTexture(cached.texture)
+      }
+      this.textTextureCache.clear()
     }
     
+    this.spatialIndex.clear()
+    this.dirtyStrokes.clear()
     this.gl = null
     this.canvas = null
     this.initialized = false

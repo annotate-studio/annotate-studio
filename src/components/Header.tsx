@@ -111,6 +111,7 @@ function HeaderComponent({ onNewFile, onZoomIn, onZoomOut, onResetZoom, onFullSc
   const [isSaving, setIsSaving] = useState(false)
   const [updateAvailable, setUpdateAvailable] = useState<GitHubRelease | null>(null)
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false)
+  const [exportProgress, setExportProgress] = useState<{ current: number; total: number } | null>(null)
 
   const checkForUpdates = useCallback(async (showNoUpdate = false) => {
     try {
@@ -128,7 +129,7 @@ function HeaderComponent({ onNewFile, onZoomIn, onZoomOut, onResetZoom, onFullSc
         setUpdateAvailable(null)
       }
     } catch (err) {
-      console.error("Failed to check for updates:", err)
+      
     } finally {
       setIsCheckingUpdate(false)
     }
@@ -166,24 +167,59 @@ function HeaderComponent({ onNewFile, onZoomIn, onZoomOut, onResetZoom, onFullSc
       setError(null)
       clearPdf()
 
-      const filePath = await openPdfDialog()
-      if (!filePath) {
+      const { open } = await import("@tauri-apps/plugin-dialog")
+      
+      const filePath = await open({
+        multiple: false,
+        filters: [
+          { name: "PDF Files", extensions: ["pdf"] },
+          { name: "Annotate Studio Project", extensions: ["asp"] },
+        ],
+      })
+
+      if (!filePath || typeof filePath !== "string") {
         setLoading(false)
         return
       }
 
-      const pdfInfo = await openPdf(filePath)
+      if (filePath.toLowerCase().endsWith(".asp")) {
+        const { loadProject } = await import("@/lib/tauri")
+        const projectData = await loadProject(filePath)
+        
+        if (projectData && projectData.pdf_path) {
+          const pdfInfo = await openPdf(projectData.pdf_path)
+          
+          if (pdfInfo) {
+            setPdfPath(pdfInfo.path)
+            setPagesMeta(
+              pdfInfo.pages_meta.map((p) => ({
+                pageNumber: p.page_number,
+                width: p.width,
+                height: p.height,
+              }))
+            )
+            
+            const loadedStrokes = JSON.parse(projectData.strokes)
+            useCanvasStore.setState({ strokes: loadedStrokes })
+            
+            setCurrentProjectPath(filePath)
+            onPdfLoaded?.()
+          }
+        }
+      } else {
+        const pdfInfo = await openPdf(filePath)
 
-      if (pdfInfo) {
-        setPdfPath(pdfInfo.path)
-        setPagesMeta(
-          pdfInfo.pages_meta.map((p) => ({
-            pageNumber: p.page_number,
-            width: p.width,
-            height: p.height,
-          }))
-        )
-        onPdfLoaded?.()
+        if (pdfInfo) {
+          setPdfPath(pdfInfo.path)
+          setPagesMeta(
+            pdfInfo.pages_meta.map((p) => ({
+              pageNumber: p.page_number,
+              width: p.width,
+              height: p.height,
+            }))
+          )
+          onPdfLoaded?.()
+        }
       }
     } catch (err) {
       console.error("[Frontend] Error:", err)
@@ -211,18 +247,159 @@ function HeaderComponent({ onNewFile, onZoomIn, onZoomOut, onResetZoom, onFullSc
       setIsSaving(true)
 
       if (currentProjectPath.toLowerCase().endsWith(".pdf")) {
-        if (!canvasRef?.current) return
-        const canvas = canvasRef.current
-        const imageData = canvas.toDataURL("image/png")
-        const width = pagesMeta.length > 0 ? pagesMeta[0].width : canvas.width
-        const height = pagesMeta.length > 0 ? pagesMeta[0].height : canvas.height
-        await exportToPdf(currentProjectPath, [{ image_data: imageData, width, height }])
+        if (!pdfPath || !canvasRef?.current) {
+          setIsSaving(false)
+          return
+        }
+        
+        setExportProgress({ current: 0, total: pagesMeta.length })
+        
+        const allPages: any[] = []
+        const { renderPdfPage } = await import("@/lib/tauri")
+        const BATCH_SIZE = 5
+        
+        for (let batchStart = 0; batchStart < pagesMeta.length; batchStart += BATCH_SIZE) {
+          const batchEnd = Math.min(batchStart + BATCH_SIZE, pagesMeta.length)
+          const batchPromises = []
+          
+          for (let i = batchStart; i < batchEnd; i++) {
+            const pageMeta = pagesMeta[i]
+            
+            batchPromises.push((async () => {
+              const offscreenCanvas = document.createElement('canvas')
+              offscreenCanvas.width = pageMeta.width
+              offscreenCanvas.height = pageMeta.height
+              const ctx = offscreenCanvas.getContext('2d', { willReadFrequently: false })
+              
+              if (ctx) {
+                const pdfPageData = await renderPdfPage(pdfPath, pageMeta.pageNumber, 2400)
+                
+                if (pdfPageData) {
+                  const img = new Image()
+                  await new Promise((resolve) => {
+                    img.onload = resolve
+                    img.src = pdfPageData.image_data
+                  })
+                  ctx.drawImage(img, 0, 0, pageMeta.width, pageMeta.height)
+                }
+                
+                const pageStrokes = strokes.filter(s => s.pageId === pageMeta.pageNumber)
+                
+                for (const stroke of pageStrokes) {
+                  ctx.strokeStyle = stroke.color
+                  ctx.lineWidth = stroke.thickness
+                  ctx.globalAlpha = stroke.opacity / 100
+                  ctx.lineCap = 'round'
+                  ctx.lineJoin = 'round'
+                  
+                  if (stroke.tool === 'pen' || stroke.tool === 'highlighter') {
+                    if (stroke.points.length > 1) {
+                      ctx.beginPath()
+                      ctx.moveTo(stroke.points[0].x, stroke.points[0].y)
+                      for (let j = 1; j < stroke.points.length; j++) {
+                        ctx.lineTo(stroke.points[j].x, stroke.points[j].y)
+                      }
+                      ctx.stroke()
+                    }
+                  } else if (stroke.tool.startsWith('shape-')) {
+                    if (stroke.points.length >= 2) {
+                      const [p1, p2] = stroke.points
+                      const shapeType = stroke.tool.replace('shape-', '')
+                      
+                      ctx.strokeStyle = stroke.color
+                      if (stroke.backgroundColor && stroke.backgroundColor !== 'transparent') {
+                        ctx.fillStyle = stroke.backgroundColor
+                      }
+                      
+                      if (shapeType === 'rectangle') {
+                        ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y)
+                        if (stroke.backgroundColor && stroke.backgroundColor !== 'transparent') {
+                          ctx.fillRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y)
+                        }
+                      } else if (shapeType === 'circle') {
+                        const rx = Math.abs(p2.x - p1.x) / 2
+                        const ry = Math.abs(p2.y - p1.y) / 2
+                        const cx = (p1.x + p2.x) / 2
+                        const cy = (p1.y + p2.y) / 2
+                        ctx.beginPath()
+                        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
+                        ctx.stroke()
+                        if (stroke.backgroundColor && stroke.backgroundColor !== 'transparent') {
+                          ctx.fill()
+                        }
+                      } else if (shapeType === 'line') {
+                        ctx.beginPath()
+                        ctx.moveTo(p1.x, p1.y)
+                        ctx.lineTo(p2.x, p2.y)
+                        ctx.stroke()
+                      } else if (shapeType === 'arrow') {
+                        ctx.beginPath()
+                        ctx.moveTo(p1.x, p1.y)
+                        ctx.lineTo(p2.x, p2.y)
+                        ctx.stroke()
+                        
+                        const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x)
+                        const arrowLength = 15
+                        ctx.beginPath()
+                        ctx.moveTo(p2.x, p2.y)
+                        ctx.lineTo(p2.x - arrowLength * Math.cos(angle - Math.PI / 6), p2.y - arrowLength * Math.sin(angle - Math.PI / 6))
+                        ctx.moveTo(p2.x, p2.y)
+                        ctx.lineTo(p2.x - arrowLength * Math.cos(angle + Math.PI / 6), p2.y - arrowLength * Math.sin(angle + Math.PI / 6))
+                        ctx.stroke()
+                      }
+                    }
+                  } else if (stroke.tool.startsWith('text:')) {
+                    const text = stroke.tool.replace('text:', '')
+                    const fontSize = Math.max(14, stroke.thickness * 4)
+                    ctx.font = `${fontSize}px Arial`
+                    ctx.fillStyle = stroke.color
+                    ctx.fillText(text, stroke.points[0].x, stroke.points[0].y)
+                  }
+                  
+                  ctx.globalAlpha = 1
+                }
+                
+                const imageData = offscreenCanvas.toDataURL('image/png', 0.95)
+                
+                offscreenCanvas.width = 0
+                offscreenCanvas.height = 0
+                
+                return {
+                  index: i,
+                  data: {
+                    image_data: imageData,
+                    width: pageMeta.width,
+                    height: pageMeta.height,
+                  }
+                }
+              }
+              return null
+            })())
+          }
+          
+          const batchResults = await Promise.all(batchPromises)
+          
+          for (const result of batchResults) {
+            if (result) {
+              allPages[result.index] = result.data
+              setExportProgress({ current: result.index + 1, total: pagesMeta.length })
+            }
+          }
+          
+          if (batchEnd < pagesMeta.length) {
+            await new Promise(resolve => setTimeout(resolve, 10))
+          }
+        }
+        
+        await exportToPdf(currentProjectPath, allPages.filter(p => p))
+        setExportProgress(null)
       } else {
         const strokesJson = JSON.stringify(strokes)
         await saveProject(currentProjectPath, pdfPath, strokesJson)
       }
     } catch (err) {
       console.error("Save failed:", err)
+      setExportProgress(null)
     } finally {
       setIsSaving(false)
     }
@@ -238,12 +415,152 @@ function HeaderComponent({ onNewFile, onZoomIn, onZoomOut, onResetZoom, onFullSc
       }
 
       if (filePath.toLowerCase().endsWith(".pdf")) {
-        if (!canvasRef?.current) return
-        const canvas = canvasRef.current
-        const imageData = canvas.toDataURL("image/png")
-        const width = pagesMeta.length > 0 ? pagesMeta[0].width : canvas.width
-        const height = pagesMeta.length > 0 ? pagesMeta[0].height : canvas.height
-        await exportToPdf(filePath, [{ image_data: imageData, width, height }])
+        if (!pdfPath || !canvasRef?.current) {
+          setIsSaving(false)
+          return
+        }
+        
+        setExportProgress({ current: 0, total: pagesMeta.length })
+        
+        const allPages: any[] = []
+        const { renderPdfPage } = await import("@/lib/tauri")
+        const BATCH_SIZE = 5
+        
+        for (let batchStart = 0; batchStart < pagesMeta.length; batchStart += BATCH_SIZE) {
+          const batchEnd = Math.min(batchStart + BATCH_SIZE, pagesMeta.length)
+          const batchPromises = []
+          
+          for (let i = batchStart; i < batchEnd; i++) {
+            const pageMeta = pagesMeta[i]
+            
+            batchPromises.push((async () => {
+              const offscreenCanvas = document.createElement('canvas')
+              offscreenCanvas.width = pageMeta.width
+              offscreenCanvas.height = pageMeta.height
+              const ctx = offscreenCanvas.getContext('2d', { willReadFrequently: false })
+              
+              if (ctx) {
+                const pdfPageData = await renderPdfPage(pdfPath, pageMeta.pageNumber, 2400)
+                
+                if (pdfPageData) {
+                  const img = new Image()
+                  await new Promise((resolve) => {
+                    img.onload = resolve
+                    img.src = pdfPageData.image_data
+                  })
+                  ctx.drawImage(img, 0, 0, pageMeta.width, pageMeta.height)
+                }
+                
+                const pageStrokes = strokes.filter(s => s.pageId === pageMeta.pageNumber)
+                
+                for (const stroke of pageStrokes) {
+                  ctx.strokeStyle = stroke.color
+                  ctx.lineWidth = stroke.thickness
+                  ctx.globalAlpha = stroke.opacity / 100
+                  ctx.lineCap = 'round'
+                  ctx.lineJoin = 'round'
+                  
+                  if (stroke.tool === 'pen' || stroke.tool === 'highlighter') {
+                    if (stroke.points.length > 1) {
+                      ctx.beginPath()
+                      ctx.moveTo(stroke.points[0].x, stroke.points[0].y)
+                      for (let j = 1; j < stroke.points.length; j++) {
+                        ctx.lineTo(stroke.points[j].x, stroke.points[j].y)
+                      }
+                      ctx.stroke()
+                    }
+                  } else if (stroke.tool.startsWith('shape-')) {
+                    if (stroke.points.length >= 2) {
+                      const [p1, p2] = stroke.points
+                      const shapeType = stroke.tool.replace('shape-', '')
+                      
+                      ctx.strokeStyle = stroke.color
+                      if (stroke.backgroundColor && stroke.backgroundColor !== 'transparent') {
+                        ctx.fillStyle = stroke.backgroundColor
+                      }
+                      
+                      if (shapeType === 'rectangle') {
+                        ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y)
+                        if (stroke.backgroundColor && stroke.backgroundColor !== 'transparent') {
+                          ctx.fillRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y)
+                        }
+                      } else if (shapeType === 'circle') {
+                        const rx = Math.abs(p2.x - p1.x) / 2
+                        const ry = Math.abs(p2.y - p1.y) / 2
+                        const cx = (p1.x + p2.x) / 2
+                        const cy = (p1.y + p2.y) / 2
+                        ctx.beginPath()
+                        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
+                        ctx.stroke()
+                        if (stroke.backgroundColor && stroke.backgroundColor !== 'transparent') {
+                          ctx.fill()
+                        }
+                      } else if (shapeType === 'line') {
+                        ctx.beginPath()
+                        ctx.moveTo(p1.x, p1.y)
+                        ctx.lineTo(p2.x, p2.y)
+                        ctx.stroke()
+                      } else if (shapeType === 'arrow') {
+                        ctx.beginPath()
+                        ctx.moveTo(p1.x, p1.y)
+                        ctx.lineTo(p2.x, p2.y)
+                        ctx.stroke()
+                        
+                        const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x)
+                        const arrowLength = 15
+                        ctx.beginPath()
+                        ctx.moveTo(p2.x, p2.y)
+                        ctx.lineTo(p2.x - arrowLength * Math.cos(angle - Math.PI / 6), p2.y - arrowLength * Math.sin(angle - Math.PI / 6))
+                        ctx.moveTo(p2.x, p2.y)
+                        ctx.lineTo(p2.x - arrowLength * Math.cos(angle + Math.PI / 6), p2.y - arrowLength * Math.sin(angle + Math.PI / 6))
+                        ctx.stroke()
+                      }
+                    }
+                  } else if (stroke.tool.startsWith('text:')) {
+                    const text = stroke.tool.replace('text:', '')
+                    const fontSize = Math.max(14, stroke.thickness * 4)
+                    ctx.font = `${fontSize}px Arial`
+                    ctx.fillStyle = stroke.color
+                    ctx.fillText(text, stroke.points[0].x, stroke.points[0].y)
+                  }
+                  
+                  ctx.globalAlpha = 1
+                }
+                
+                const imageData = offscreenCanvas.toDataURL('image/png', 0.95)
+                
+                offscreenCanvas.width = 0
+                offscreenCanvas.height = 0
+                
+                return {
+                  index: i,
+                  data: {
+                    image_data: imageData,
+                    width: pageMeta.width,
+                    height: pageMeta.height,
+                  }
+                }
+              }
+              return null
+            })())
+          }
+          
+          const batchResults = await Promise.all(batchPromises)
+          
+          for (const result of batchResults) {
+            if (result) {
+              allPages[result.index] = result.data
+              setExportProgress({ current: result.index + 1, total: pagesMeta.length })
+            }
+          }
+          
+          if (batchEnd < pagesMeta.length) {
+            await new Promise(resolve => setTimeout(resolve, 10))
+          }
+        }
+        
+        await exportToPdf(filePath, allPages.filter(p => p))
+        setExportProgress(null)
       } else {
         const strokesJson = JSON.stringify(strokes)
         await saveProject(filePath, pdfPath, strokesJson)
@@ -251,6 +568,7 @@ function HeaderComponent({ onNewFile, onZoomIn, onZoomOut, onResetZoom, onFullSc
       setCurrentProjectPath(filePath)
     } catch (err) {
       console.error("Save As failed:", err)
+      setExportProgress(null)
     } finally {
       setIsSaving(false)
     }
@@ -431,6 +749,17 @@ function HeaderComponent({ onNewFile, onZoomIn, onZoomOut, onResetZoom, onFullSc
         </div>
 
         <div className="flex items-center gap-1.5">
+          {updateAvailable && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 px-2.5 text-xs gap-1.5 rounded-md border-green-500/50 text-green-600 dark:text-green-400 hover:bg-green-500/10"
+              onClick={() => window.open(updateAvailable.html_url, "_blank")}
+            >
+              <Download className="h-3 w-3" />
+              Update Available
+            </Button>
+          )}
           <Button
             size="sm"
             className="h-6 px-2.5 text-xs gap-1.5 rounded-md"
@@ -490,21 +819,22 @@ function HeaderComponent({ onNewFile, onZoomIn, onZoomOut, onResetZoom, onFullSc
               <p className="text-sm text-muted-foreground mt-1">Version {APP_VERSION}</p>
             </div>
             <p className="text-sm text-muted-foreground leading-relaxed max-w-xs">
-              Professional-grade PDF annotation suite with real-time collaboration capabilities.
-              Precision drawing tools, mathematical symbols, shape primitives, and seamless export workflows.
+              High-performance PDF annotation engine built with WebGL rendering, 
+              spatial indexing, and vector-based drawing primitives for professional workflows.
             </p>
             <div className="flex flex-wrap justify-center gap-1.5">
-              <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">Next.js 16</span>
-              <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">React 19</span>
-              <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">Tauri 2.0</span>
-              <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">Tailwind CSS</span>
-              <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">shadcn/ui</span>
-              <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Rust WASM</span>
+              <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">Next.js</span>
+              <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">React</span>
+              <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">Tauri</span>
+              <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Rust</span>
+              <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">WebAssembly</span>
+              <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">TypeScript</span>
+              <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">WebGL</span>
               <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">Zustand</span>
             </div>
             <div className="pt-2 border-t border-border/50 w-full">
               <p className="text-xs text-muted-foreground">
-                Crafted with ❤️ by <span className="font-semibold text-foreground">CluvexStudio</span> & <span className="font-semibold text-foreground">ParsaDostifam</span>
+                Developed by <span className="font-semibold text-foreground">CluvexStudio</span> & <span className="font-semibold text-foreground">ParsaDostifam</span>
               </p>
             </div>
             <a
@@ -549,6 +879,38 @@ function HeaderComponent({ onNewFile, onZoomIn, onZoomOut, onResetZoom, onFullSc
                   Download
                 </Button>
               </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={exportProgress !== null} onOpenChange={() => {}}>
+        <DialogContent className="max-w-sm" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin text-violet-500" />
+              Exporting PDF
+            </DialogTitle>
+          </DialogHeader>
+          {exportProgress && (
+            <div className="flex flex-col gap-4 py-4">
+              <div className="text-center">
+                <p className="text-2xl font-bold tabular-nums">
+                  {exportProgress.current} / {exportProgress.total}
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Rendering pages with annotations...
+                </p>
+              </div>
+              <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-all duration-300"
+                  style={{ width: `${(exportProgress.current / exportProgress.total) * 100}%` }}
+                />
+              </div>
+              <p className="text-xs text-center text-muted-foreground">
+                {Math.round((exportProgress.current / exportProgress.total) * 100)}% complete
+              </p>
             </div>
           )}
         </DialogContent>
