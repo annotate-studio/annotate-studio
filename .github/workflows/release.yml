@@ -13,7 +13,6 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       release_id: ${{ steps.create-release.outputs.result }}
-      release_upload_url: ${{ steps.create-release.outputs.upload_url }}
 
     steps:
       - uses: actions/checkout@v4
@@ -36,8 +35,7 @@ jobs:
             Download the appropriate installer for your platform below.
 
             ### Windows
-            - NSIS Installer (Recommended): Annotate-Studio_${process.env.PACKAGE_VERSION}_x64-setup.exe
-            - MSI Installer: Annotate-Studio_${process.env.PACKAGE_VERSION}_x64_en-US.msi
+            - NSIS Installer: Annotate-Studio_${process.env.PACKAGE_VERSION}_x64-setup.exe
 
             ### macOS
             - Apple Silicon (M1/M2/M3): Annotate-Studio_${process.env.PACKAGE_VERSION}_aarch64.dmg
@@ -80,22 +78,18 @@ jobs:
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
             target: 'aarch64-apple-darwin'
-            arch: 'aarch64'
             
           - platform: 'macos-latest'
             args: '--target x86_64-apple-darwin'
             target: 'x86_64-apple-darwin'
-            arch: 'x64'
             
           - platform: 'ubuntu-22.04'
             args: ''
             target: 'x86_64-unknown-linux-gnu'
-            arch: 'amd64'
             
           - platform: 'windows-latest'
-            args: ''
+            args: '--bundles nsis'
             target: 'x86_64-pc-windows-msvc'
-            arch: 'x64'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -163,4 +157,3 @@ jobs:
               draft: false,
               prerelease: false
             })
-
