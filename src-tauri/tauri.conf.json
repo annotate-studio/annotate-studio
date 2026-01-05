@@ -57,7 +57,7 @@
       "nsis": {
         "installerIcon": "icons/icon.ico",
         "installMode": "perMachine",
-        "languages": ["en-US"],
+        "languages": ["English"],
         "displayLanguageSelector": false
       }
     },
