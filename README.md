@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="AnnotateStudio.png" alt="Annotate Studio Logo" width="200"/>
+<img src="docs/AnnotateStudio-Logo.png" alt="Annotate Studio Logo" width="200"/>
 
 **High-performance PDF annotation engine built with WebGL rendering and spatial indexing**
 
@@ -17,7 +17,7 @@
 ---
 
 <div align="center">
-<img src="AnnotateStudioS.png" alt="Annotate Studio Screenshot" width="800"/>
+<img src="docs/AnnotateStudio-Preview.png" alt="Annotate Studio Preview" width="800"/>
 </div>
 
 ---
