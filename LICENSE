@@ -1,0 +1,29 @@
+ANNOTATE STUDIO SOURCE-AVAILABLE LICENSE (ASSAL)
+
+Copyright (c) 2026 Annotate Studio. All rights reserved.
+
+1. GRANT OF RIGHTS FOR PERSONAL AND LOCAL USE
+
+Subject to the terms and conditions of this License, the Licensor (Annotate Studio) hereby grants you a worldwide, non-exclusive, royalty-free, revocable license to:
+
+- View, download, and inspect the source code of Annotate Studio.
+- Run, modify, and build the software locally for your personal, individual, non-commercial use.
+- Use the software internally within your own personal workspace, home environment, or for non-commercial educational and research purposes.
+
+1. COMMERCIAL AND ENTERPRISE RESTRICTIONS
+   You are strictly prohibited from using, modifying, redistributing, or incorporating the software, or any portion of it, for any Commercial or Enterprise Purpose without an explicit, paid commercial license agreement executed with Annotate Studio.
+
+A "Commercial or Enterprise Purpose" includes, but is not limited to:
+
+- Deploying or running the software within a corporate, LLC, partnership, or any other for-profit business infrastructure for internal business operations.
+- Offering the software as a paid or free managed service, hosting provider, SaaS, or cloud-based utility to third parties.
+- Embedding, bundling, or distributing the software (in source or modified binary form) inside any commercial product, tool, or service offered to others.
+
+1. PROHIBITION OF UNAUTHORIZED FORKING AND REDISTRIBUTION
+   While you are permitted to modify the source code for your local personal use, you are strictly prohibited from publishing, publicizing, or redistributing a standalone public fork, package, or derivative distribution of Annotate Studio designed to compete with, substitute, or bypass the commercial offerings of Annotate Studio.
+
+2. TERMINATION
+   This license is effective until terminated. Any breach of Section 2 or Section 3 of this License will result in the immediate and automatic termination of your rights under this License. Upon termination, you must cease all use of the software and destroy all copies, local modifications, and installations of Annotate Studio in your possession or control.
+
+3. DISCLAIMER OF WARRANTY AND LIMITATION OF LIABILITY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
