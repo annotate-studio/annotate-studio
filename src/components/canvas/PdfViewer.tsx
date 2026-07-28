@@ -43,6 +43,8 @@ interface PdfViewerProps {
   onPenColorChange?: (c: string) => void;
   lineWidth?: number;
   onLineWidthChange?: (w: number) => void;
+  filled?: boolean;
+  onFilledChange?: (v: boolean) => void;
 }
 
 const toolToEmbedId: Record<string, string | null> = {
@@ -100,10 +102,12 @@ const PdfViewerInner = React.memo(forwardRef<PdfViewerHandle, PdfViewerProps>(fu
   tool: externalTool, onToolChange,
   penColor: externalPenColor, onPenColorChange,
   lineWidth: externalLineWidth, onLineWidthChange,
+  filled: externalFilled, onFilledChange,
 }, ref) {
   const [internalTool, setInternalTool] = useState<Tool>('select');
   const [internalPenColor, setInternalPenColor] = useState('#1a1a1a');
   const [internalLineWidth, setInternalLineWidth] = useState(2);
+  const [internalFilled, setInternalFilled] = useState(true);
   
   const tool = externalTool ?? internalTool;
   const setTool = onToolChange ?? setInternalTool;
@@ -111,6 +115,8 @@ const PdfViewerInner = React.memo(forwardRef<PdfViewerHandle, PdfViewerProps>(fu
   const setPenColor = onPenColorChange ?? setInternalPenColor;
   const lineWidth = externalLineWidth ?? internalLineWidth;
   const setLineWidth = onLineWidthChange ?? setInternalLineWidth;
+  const filled = externalFilled ?? internalFilled;
+  const setFilled = onFilledChange ?? setInternalFilled;
 
   const safeId = useMemo(() => {
     const raw = resourceId || 'default';
@@ -165,6 +171,8 @@ const PdfViewerInner = React.memo(forwardRef<PdfViewerHandle, PdfViewerProps>(fu
           setPenColor={setPenColor}
           lineWidth={lineWidth}
           setLineWidth={setLineWidth}
+          filled={filled}
+          setFilled={setFilled}
           safeId={safeId}
           exportFnRef={exportFnRef}
         />
@@ -182,6 +190,7 @@ const PdfViewerInner = React.memo(forwardRef<PdfViewerHandle, PdfViewerProps>(fu
             tool={tool}
             penColor={penColor}
             lineWidth={lineWidth}
+            filled={filled}
             safeId={safeId}
             onAskAi={onAskAi}
             exportFnRef={exportFnRef}
@@ -207,12 +216,13 @@ function isLightColor(hex: string) {
 
 // ── Isolated Active Toolbar to safely scope the zoom hook ──
 function ActiveToolbar({
-  documentId, tool, setTool, penColor, setPenColor, lineWidth, setLineWidth, safeId, exportFnRef
+  documentId, tool, setTool, penColor, setPenColor, lineWidth, setLineWidth, filled, setFilled, safeId, exportFnRef
 }: {
   documentId: string;
   tool: Tool; setTool: (t: Tool) => void;
   penColor: string; setPenColor: (c: string) => void;
   lineWidth: number; setLineWidth: (w: number) => void;
+  filled: boolean; setFilled: (v: boolean) => void;
   safeId: string;
   exportFnRef: React.MutableRefObject<(() => Promise<Uint8Array | null>) | null>;
 }) {
@@ -263,6 +273,21 @@ function ActiveToolbar({
             value={penColor}
             onChange={setPenColor}
           />
+          {(tool === 'rectangle' || tool === 'circle') && (
+            <button
+              onClick={() => setFilled(!filled)}
+              title={filled ? 'Switch to outline' : 'Switch to filled'}
+              style={{
+                padding: '2px 5px', fontSize: 10, borderRadius: 'var(--radius-xs)',
+                border: '1px solid var(--border)', cursor: 'pointer',
+                background: filled ? 'var(--primary-light)' : 'transparent',
+                color: filled ? 'var(--primary)' : 'var(--text-muted)',
+                fontFamily: 'inherit', lineHeight: 1.5,
+              }}
+            >
+              {filled ? 'Fill' : 'Outline'}
+            </button>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 4 }}>
             <Sliders size={11} style={{ color: 'var(--text-muted)' }} />
             <Select
@@ -336,12 +361,13 @@ const TOOL_ENTRIES: { id: Tool; Icon: any; label: string }[] = [
 
 // ── Document Canvas & Plugins ──
 function DocumentCanvas({
-  documentId, tool, penColor, lineWidth, safeId, onAskAi, exportFnRef, viewerRef
+  documentId, tool, penColor, lineWidth, filled, safeId, onAskAi, exportFnRef, viewerRef
 }: {
   documentId: string;
   tool: Tool;
   penColor: string;
   lineWidth: number;
+  filled: boolean;
   safeId: string;
   onAskAi: (t?: string) => void;
   exportFnRef: React.MutableRefObject<(() => Promise<Uint8Array | null>) | null>;
@@ -378,6 +404,7 @@ function DocumentCanvas({
   }, [tool]);
 
   // Click on the grey viewer background (outside any page) → deselect
+  // Skip when clicking on floating menus (Remove / Rotate / context menu)
   useEffect(() => {
     const el = viewerRef.current;
     if (!el) return;
@@ -386,6 +413,8 @@ function DocumentCanvas({
       if (!ap || !annotationState.selectedUids?.length) return;
       const target = e.target instanceof Element ? e.target : null;
       if (!target) return;
+      // Don't deselect when interacting with floating menus or context menus
+      if (target.closest('[data-keep-selection]')) return;
       // Walk up from the click target to the viewer — if we hit a page
       // (white background) let the AnnotationLayer handle it.
       let node: Element | null = target;
@@ -456,10 +485,11 @@ function DocumentCanvas({
       interaction: { exclusive: true, cursor: 'crosshair' },
       matchScore: () => 0,
       defaults: { type: PdfAnnotationSubtype.FREETEXT },
+      behavior: { editAfterCreate: true, selectAfterCreate: true },
     } as any);
   }, []);
 
-  // When penColor / lineWidth changes:
+  // When penColor / lineWidth / filled changes:
   //   1. Push new defaults so future strokes use them
   //   2. Repaint any currently selected annotations
   useEffect(() => {
@@ -473,6 +503,9 @@ function DocumentCanvas({
         strokeWidth: lineWidth,
       } as any);
     }
+    const fillColor = filled ? penColor : '#00000000';
+    ac.setToolDefaults('square', { color: fillColor } as any);
+    ac.setToolDefaults('circle', { color: fillColor } as any);
     ac.setToolDefaults('freeText', {
       fontColor: penColor,
       fontSize: Math.max(8, Math.round(lineWidth * 6)),
@@ -480,28 +513,38 @@ function DocumentCanvas({
     for (const uid of selectedUidsRef.current) {
       const tracked = ap.getAnnotationById(uid);
       if (!tracked) continue;
-      const isFreeText = tracked.object.type === PdfAnnotationSubtype.FREETEXT;
-      ap.updateAnnotation(tracked.object.pageIndex, uid, isFreeText ? {
-        fontColor: penColor,
-        fontSize: Math.max(8, Math.round(lineWidth * 6)),
-      } : {
-        strokeColor: penColor,
-        strokeWidth: lineWidth,
-      } as any);
+      if (tracked.object.type === PdfAnnotationSubtype.FREETEXT) {
+        ap.updateAnnotation(tracked.object.pageIndex, uid, {
+          fontColor: penColor,
+          fontSize: Math.max(8, Math.round(lineWidth * 6)),
+        } as any);
+      } else if (tracked.object.type === PdfAnnotationSubtype.SQUARE || tracked.object.type === PdfAnnotationSubtype.CIRCLE) {
+        ap.updateAnnotation(tracked.object.pageIndex, uid, {
+          strokeColor: penColor,
+          strokeWidth: lineWidth,
+          color: fillColor,
+        } as any);
+      } else {
+        ap.updateAnnotation(tracked.object.pageIndex, uid, {
+          strokeColor: penColor,
+          strokeWidth: lineWidth,
+        } as any);
+      }
     }
-  }, [penColor, lineWidth]);
+  }, [penColor, lineWidth, filled]);
 
-  // Eraser mode: when the user taps an annotation, delete it immediately
+  // Eraser mode: delete all selected annotations immediately
   useEffect(() => {
     if (tool !== 'eraser') return;
     const ap = annotationProvidesRef.current;
     if (!ap) return;
     const uids = selectedUidsRef.current;
     if (uids.length === 0) return;
-    const uid = uids[0];
-    const tracked = ap.getAnnotationById(uid);
-    if (tracked) {
-      ap.deleteAnnotation(tracked.object.pageIndex, uid);
+    for (const uid of uids) {
+      const tracked = ap.getAnnotationById(uid);
+      if (tracked) {
+        ap.deleteAnnotation(tracked.object.pageIndex, uid);
+      }
     }
   }, [tool, selectedUids]);
 
@@ -612,7 +655,7 @@ function DocumentCanvas({
 
       {/* Floating Action Menu for Selected Annotations */}
       {selectedUids.length > 0 && (
-        <div style={{
+        <div data-keep-selection style={{
           position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 1100,
           background: 'var(--bg-card)', border: '1px solid var(--border)',
           borderRadius: 'var(--radius-md)', padding: '6px 12px', display: 'flex', gap: 8,
@@ -662,7 +705,7 @@ function DocumentCanvas({
       )}
 
       {contextMenu && (
-        <div ref={menuRef} style={{
+        <div ref={menuRef} data-keep-selection style={{
           position: 'absolute', left: contextMenu.x, top: contextMenu.y, zIndex: 1000,
           background: 'var(--bg-card)', border: '1px solid var(--border)',
           borderRadius: 'var(--radius-md)', padding: 4, minWidth: 140,

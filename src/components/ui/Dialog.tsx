@@ -26,7 +26,7 @@ export default function Dialog({ open, onClose, title, children, width = 400 }: 
       onClick={onClose}
       style={{
         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-        zIndex: 9999,
+        zIndex: 2147483647,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: 'var(--bg-overlay)',
       }}
