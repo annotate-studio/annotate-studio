@@ -13,7 +13,7 @@ import { ViewportPluginPackage, Viewport } from '@embedpdf/plugin-viewport/react
 import { ScrollPluginPackage, Scroller } from '@embedpdf/plugin-scroll/react';
 import { RenderPluginPackage, RenderLayer } from '@embedpdf/plugin-render/react';
 import { AnnotationPluginPackage, AnnotationLayer, useAnnotation, useAnnotationCapability } from '@embedpdf/plugin-annotation/react';
-import { PdfAnnotationSubtype } from '@embedpdf/models';
+import { PdfAnnotationSubtype, PdfAnnotationLineEnding } from '@embedpdf/models';
 import { ZoomPluginPackage, useZoom } from '@embedpdf/plugin-zoom/react';
 import { ExportPluginPackage, useExport } from '@embedpdf/plugin-export/react';
 import { SelectionPluginPackage, SelectionLayer, useSelectionCapability } from '@embedpdf/plugin-selection/react';
@@ -107,6 +107,7 @@ const PdfViewerInner = React.memo(forwardRef<PdfViewerHandle, PdfViewerProps>(fu
   const [internalTool, setInternalTool] = useState<Tool>('select');
   const [internalPenColor, setInternalPenColor] = useState('#1a1a1a');
   const [internalLineWidth, setInternalLineWidth] = useState(2);
+  const [internalHighlighterWidth, setInternalHighlighterWidth] = useState(12);
   const [internalFilled, setInternalFilled] = useState(true);
   
   const tool = externalTool ?? internalTool;
@@ -115,6 +116,8 @@ const PdfViewerInner = React.memo(forwardRef<PdfViewerHandle, PdfViewerProps>(fu
   const setPenColor = onPenColorChange ?? setInternalPenColor;
   const lineWidth = externalLineWidth ?? internalLineWidth;
   const setLineWidth = onLineWidthChange ?? setInternalLineWidth;
+  const highlighterWidth = internalHighlighterWidth;
+  const setHighlighterWidth = setInternalHighlighterWidth;
   const filled = externalFilled ?? internalFilled;
   const setFilled = onFilledChange ?? setInternalFilled;
 
@@ -171,6 +174,8 @@ const PdfViewerInner = React.memo(forwardRef<PdfViewerHandle, PdfViewerProps>(fu
           setPenColor={setPenColor}
           lineWidth={lineWidth}
           setLineWidth={setLineWidth}
+          highlighterWidth={highlighterWidth}
+          setHighlighterWidth={setHighlighterWidth}
           filled={filled}
           setFilled={setFilled}
           safeId={safeId}
@@ -190,6 +195,7 @@ const PdfViewerInner = React.memo(forwardRef<PdfViewerHandle, PdfViewerProps>(fu
             tool={tool}
             penColor={penColor}
             lineWidth={lineWidth}
+            highlighterWidth={highlighterWidth}
             filled={filled}
             safeId={safeId}
             onAskAi={onAskAi}
@@ -216,12 +222,14 @@ function isLightColor(hex: string) {
 
 // ── Isolated Active Toolbar to safely scope the zoom hook ──
 function ActiveToolbar({
-  documentId, tool, setTool, penColor, setPenColor, lineWidth, setLineWidth, filled, setFilled, safeId, exportFnRef
+  documentId, tool, setTool, penColor, setPenColor, lineWidth, setLineWidth,
+  highlighterWidth, setHighlighterWidth, filled, setFilled, safeId, exportFnRef
 }: {
   documentId: string;
   tool: Tool; setTool: (t: Tool) => void;
   penColor: string; setPenColor: (c: string) => void;
   lineWidth: number; setLineWidth: (w: number) => void;
+  highlighterWidth: number; setHighlighterWidth: (w: number) => void;
   filled: boolean; setFilled: (v: boolean) => void;
   safeId: string;
   exportFnRef: React.MutableRefObject<(() => Promise<Uint8Array | null>) | null>;
@@ -290,18 +298,33 @@ function ActiveToolbar({
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 4 }}>
             <Sliders size={11} style={{ color: 'var(--text-muted)' }} />
-            <Select
-              value={lineWidth}
-              onChange={(v) => setLineWidth(Number(v))}
-              options={[
-                { value: 1, label: '1px' },
-                { value: 2, label: '2px' },
-                { value: 4, label: '4px' },
-                { value: 6, label: '6px' },
-                { value: 10, label: '10px' },
-              ]}
-              title="Stroke Width"
-            />
+            {tool === 'highlighter' ? (
+              <Select
+                value={highlighterWidth}
+                onChange={(v) => setHighlighterWidth(Number(v))}
+                options={[
+                  { value: 4, label: '4px' },
+                  { value: 8, label: '8px' },
+                  { value: 12, label: '12px' },
+                  { value: 18, label: '18px' },
+                  { value: 26, label: '26px' },
+                ]}
+                title="Highlighter Width"
+              />
+            ) : (
+              <Select
+                value={lineWidth}
+                onChange={(v) => setLineWidth(Number(v))}
+                options={[
+                  { value: 1, label: '1px' },
+                  { value: 2, label: '2px' },
+                  { value: 4, label: '4px' },
+                  { value: 6, label: '6px' },
+                  { value: 10, label: '10px' },
+                ]}
+                title="Stroke Width"
+              />
+            )}
           </div>
         </>
       )}
@@ -361,12 +384,13 @@ const TOOL_ENTRIES: { id: Tool; Icon: any; label: string }[] = [
 
 // ── Document Canvas & Plugins ──
 function DocumentCanvas({
-  documentId, tool, penColor, lineWidth, filled, safeId, onAskAi, exportFnRef, viewerRef
+  documentId, tool, penColor, lineWidth, highlighterWidth, filled, safeId, onAskAi, exportFnRef, viewerRef
 }: {
   documentId: string;
   tool: Tool;
   penColor: string;
   lineWidth: number;
+  highlighterWidth: number;
   filled: boolean;
   safeId: string;
   onAskAi: (t?: string) => void;
@@ -435,8 +459,6 @@ function DocumentCanvas({
   selectedUidsRef.current = selectedUids;
 
   // One-time overrides:
-  //   - Set exclusive: true on all drawing tools so strokes are only
-  //     selectable when Select tool is active
   //   - Disable highlighter smart-line-recognition (auto-correction)
   //   - Disable pen commitDelay so each stroke is its own annotation
   useEffect(() => {
@@ -445,15 +467,15 @@ function DocumentCanvas({
     ac.addTool({
       id: 'inkHighlighter',
       name: 'Highlighter',
-      interaction: { exclusive: true, cursor: 'crosshair' },
+      interaction: { cursor: 'crosshair' },
       matchScore: () => 0,
-      defaults: { type: PdfAnnotationSubtype.INK, intent: 'FreeHandHighlight' },
+      defaults: { type: PdfAnnotationSubtype.INK, intent: 'FreeHandHighlight', opacity: 0.4 },
       behavior: { smartLineRecognition: false },
     } as any);
     ac.addTool({
       id: 'ink',
       name: 'Pen',
-      interaction: { exclusive: true, cursor: 'crosshair' },
+      interaction: { cursor: 'crosshair' },
       matchScore: () => 0,
       defaults: { type: PdfAnnotationSubtype.INK },
       behavior: { commitDelay: 0 },
@@ -461,28 +483,32 @@ function DocumentCanvas({
     ac.addTool({
       id: 'square',
       name: 'Rectangle',
-      interaction: { exclusive: true, cursor: 'crosshair' },
+      interaction: { cursor: 'crosshair' },
       matchScore: () => 0,
       defaults: { type: PdfAnnotationSubtype.SQUARE },
     } as any);
     ac.addTool({
       id: 'circle',
       name: 'Circle',
-      interaction: { exclusive: true, cursor: 'crosshair' },
+      interaction: { cursor: 'crosshair' },
       matchScore: () => 0,
       defaults: { type: PdfAnnotationSubtype.CIRCLE },
     } as any);
     ac.addTool({
       id: 'lineArrow',
       name: 'Arrow',
-      interaction: { exclusive: true, cursor: 'crosshair' },
+      interaction: { cursor: 'crosshair' },
       matchScore: () => 0,
-      defaults: { type: PdfAnnotationSubtype.LINE, intent: 'LineArrow' },
+      defaults: {
+        type: PdfAnnotationSubtype.LINE,
+        intent: 'LineArrow',
+        lineEndings: { start: PdfAnnotationLineEnding.None, end: PdfAnnotationLineEnding.ClosedArrow },
+      },
     } as any);
     ac.addTool({
       id: 'freeText',
       name: 'Text',
-      interaction: { exclusive: true, cursor: 'crosshair' },
+      interaction: { cursor: 'crosshair' },
       matchScore: () => 0,
       defaults: { type: PdfAnnotationSubtype.FREETEXT },
       behavior: { editAfterCreate: true, selectAfterCreate: true },
@@ -496,13 +522,18 @@ function DocumentCanvas({
     const ac = annotationCapabilityRef.current;
     const ap = annotationProvidesRef.current;
     if (!ac || !ap) return;
-    const drawingTools = ['ink', 'inkHighlighter', 'square', 'circle', 'lineArrow'];
+    const drawingTools = ['ink', 'square', 'circle', 'lineArrow'];
     for (const toolId of drawingTools) {
       ac.setToolDefaults(toolId, {
         strokeColor: penColor,
         strokeWidth: lineWidth,
       } as any);
     }
+    ac.setToolDefaults('inkHighlighter', {
+      strokeColor: penColor,
+      strokeWidth: highlighterWidth,
+      opacity: 0.4,
+    } as any);
     const fillColor = filled ? penColor : '#00000000';
     ac.setToolDefaults('square', { color: fillColor } as any);
     ac.setToolDefaults('circle', { color: fillColor } as any);
@@ -524,6 +555,18 @@ function DocumentCanvas({
           strokeWidth: lineWidth,
           color: fillColor,
         } as any);
+      } else if ((tracked.object as any).intent === 'FreeHandHighlight' || (tracked.object as any).intent === 'InkHighlight') {
+        ap.updateAnnotation(tracked.object.pageIndex, uid, {
+          strokeColor: penColor,
+          strokeWidth: highlighterWidth,
+          opacity: 0.4,
+        } as any);
+      } else if (tracked.object.type === PdfAnnotationSubtype.LINE) {
+        ap.updateAnnotation(tracked.object.pageIndex, uid, {
+          strokeColor: penColor,
+          strokeWidth: lineWidth,
+          lineEndings: { start: PdfAnnotationLineEnding.None, end: PdfAnnotationLineEnding.ClosedArrow },
+        } as any);
       } else {
         ap.updateAnnotation(tracked.object.pageIndex, uid, {
           strokeColor: penColor,
@@ -531,7 +574,7 @@ function DocumentCanvas({
         } as any);
       }
     }
-  }, [penColor, lineWidth, filled]);
+  }, [penColor, lineWidth, highlighterWidth, filled]);
 
   // Eraser mode: delete all selected annotations immediately
   useEffect(() => {
@@ -645,8 +688,10 @@ function DocumentCanvas({
                 boxShadow: '0 2px 8px rgba(0,0,0,0.3)', margin: '0 auto', background: '#fff',
               }}>
                 <RenderLayer documentId={documentId} pageIndex={page.pageIndex} style={{ pointerEvents: 'none' }} />
-                <SelectionLayer documentId={documentId} pageIndex={page.pageIndex} />
-                <AnnotationLayer documentId={documentId} pageIndex={page.pageIndex} selectionOutlineColor="#2563EB" />
+                <div style={{ pointerEvents: tool === 'select' ? undefined : 'none' }}>
+                  <SelectionLayer documentId={documentId} pageIndex={page.pageIndex} />
+                  <AnnotationLayer documentId={documentId} pageIndex={page.pageIndex} selectionOutlineColor="#2563EB" />
+                </div>
               </div>
             </PagePointerProvider>
           )} 

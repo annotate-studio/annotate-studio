@@ -24,6 +24,7 @@ export default function Dialog({ open, onClose, title, children, width = 400 }: 
   return (
     <div
       onClick={onClose}
+      onPointerDown={(e) => e.stopPropagation()}
       style={{
         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
         zIndex: 2147483647,
@@ -33,6 +34,7 @@ export default function Dialog({ open, onClose, title, children, width = 400 }: 
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         className="card"
         style={{
           width, maxWidth: '90vw',

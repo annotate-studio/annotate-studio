@@ -40,7 +40,8 @@ export default function ColorPickerDialog({ open, onClose, value, onChange }: Co
 
   if (!open) return null;
 
-  const handlePresetClick = (color: string) => {
+  const handlePresetClick = (e: React.MouseEvent, color: string) => {
+    e.stopPropagation();
     setCurrentColor(color);
     setCustomHex(color);
     onChange(color);
@@ -55,16 +56,20 @@ export default function ColorPickerDialog({ open, onClose, value, onChange }: Co
     }
   };
 
-  const handleApplyCustom = () => {
+  const handleApplyCustom = (e: React.MouseEvent) => {
+    e.stopPropagation();
     if (/^#[0-9a-fA-F]{6}$/.test(customHex)) {
       onChange(customHex);
       onClose();
     }
   };
 
+  const stopProp = (e: React.MouseEvent) => e.stopPropagation();
+
   return (
     <div
       onClick={onClose}
+      onPointerDown={stopProp}
       style={{
         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
         zIndex: 2147483647,
@@ -73,7 +78,8 @@ export default function ColorPickerDialog({ open, onClose, value, onChange }: Co
       }}
     >
       <div
-        onClick={(e) => e.stopPropagation()}
+        onClick={stopProp}
+        onPointerDown={stopProp}
         className="card"
         style={{
           width: 280, maxWidth: '90vw',
@@ -108,7 +114,7 @@ export default function ColorPickerDialog({ open, onClose, value, onChange }: Co
             {PRESET_COLORS.map((color) => (
               <button
                 key={color}
-                onClick={() => handlePresetClick(color)}
+                onClick={(e) => handlePresetClick(e, color)}
                 style={{
                   width: 28, height: 28, borderRadius: 6,
                   border: color === currentColor ? '2px solid var(--primary)' : '1px solid var(--border)',
@@ -140,6 +146,7 @@ export default function ColorPickerDialog({ open, onClose, value, onChange }: Co
             <button
               onClick={handleApplyCustom}
               disabled={!/^#[0-9a-fA-F]{6}$/.test(customHex)}
+              onPointerDown={stopProp}
               className="btn btn-ghost"
               style={{
                 padding: '4px 10px', fontSize: 11, borderRadius: 'var(--radius-sm)',
