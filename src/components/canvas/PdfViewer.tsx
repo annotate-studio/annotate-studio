@@ -362,7 +362,7 @@ function ActiveToolbar({
         a.href = url;
         a.download = `${safeId}-annotated.pdf`;
         a.click();
-        URL.revokeObjectURL(url);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
       }}
         style={{ padding: '4px 10px', fontSize: 11, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
         <Download size={11} /> Export
@@ -592,9 +592,9 @@ function DocumentCanvas({
   }, [tool, selectedUids]);
 
   useEffect(() => {
-    const ep = exportProvidesRef.current;
-    if (!ep) return;
     exportFnRef.current = async () => {
+      const ep = exportProvidesRef.current;
+      if (!ep) return null;
       try {
         const task = ep.saveAsCopy();
         const arrayBuffer = typeof (task as any).toPromise === 'function' ? await (task as any).toPromise() : await task;
@@ -605,7 +605,7 @@ function DocumentCanvas({
       }
     };
     return () => { exportFnRef.current = null; };
-  }, [exportFnRef]);
+  }, []);
 
   useEffect(() => {
     const sp = selectionProvidesRef.current;

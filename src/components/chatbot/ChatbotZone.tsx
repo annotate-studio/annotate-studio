@@ -158,7 +158,7 @@ Recap of the key takeaways.`;
       // Record assistant message in chat history with explainer data
       addChatMessage({
         role: 'assistant',
-        content: `**Explainer: ${topic}** — ${parsed.length} step${parsed.length > 1 ? 's' : ''}`,
+        content: `**${topic}** — ${parsed.length} step${parsed.length > 1 ? 's' : ''}`,
         timestamp: Date.now(),
         explainerData: { topic, steps: parsed, conv: [] },
       });
