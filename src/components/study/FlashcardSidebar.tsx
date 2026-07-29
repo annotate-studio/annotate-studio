@@ -1,21 +1,24 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Pencil, Trash2, MoreHorizontal, Clock } from 'lucide-react';
+import { Plus, Pencil, Trash2, MoreHorizontal, Clock, Layers, Eraser } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import Dialog from '@/components/ui/Dialog';
+import { deleteFlashcardsByCollection, getFlashcardStats } from '@/lib/tauri-commands';
 
 export default function FlashcardSidebar() {
   const {
     flashcardCollections, addCollection, renameCollection, removeCollection,
     setCollectionReviewPeriod,
     activeCollectionId, setActiveCollection,
+    flashcards, setFlashcards, flashcardStats, setFlashcardStats,
   } = useStore();
 
   const [dialogAdd, setDialogAdd] = useState(false);
   const [menuTarget, setMenuTarget] = useState<{ id: string; name: string } | null>(null);
   const [dialogRename, setDialogRename] = useState<{ id: string; name: string } | null>(null);
   const [dialogDelete, setDialogDelete] = useState<{ id: string; name: string } | null>(null);
+  const [dialogClear, setDialogClear] = useState<{ id: string; name: string } | null>(null);
   const [dialogPeriod, setDialogPeriod] = useState<{ id: string; days: number } | null>(null);
   const [addName, setAddName] = useState('');
   const [renameName, setRenameName] = useState('');
@@ -58,6 +61,11 @@ export default function FlashcardSidebar() {
     setMenuTarget(col);
   };
 
+  const openPeriod = (col: { id: string; reviewPeriodDays: number }) => {
+    setPeriodDays(col.reviewPeriodDays);
+    setDialogPeriod({ id: col.id, days: col.reviewPeriodDays });
+  };
+
   const menuEdit = () => {
     if (!menuTarget) return;
     setRenameName(menuTarget.name);
@@ -71,12 +79,24 @@ export default function FlashcardSidebar() {
     setMenuTarget(null);
   };
 
-  const menuPeriod = () => {
+  const menuClear = () => {
     if (!menuTarget) return;
-    const col = flashcardCollections.find(c => c.id === menuTarget.id);
-    setPeriodDays(col?.reviewPeriodDays ?? 1);
-    setDialogPeriod({ id: menuTarget.id, days: col?.reviewPeriodDays ?? 1 });
+    setDialogClear({ id: menuTarget.id, name: menuTarget.name });
     setMenuTarget(null);
+  };
+
+  const handleClear = async () => {
+    if (!dialogClear) return;
+    try {
+      await deleteFlashcardsByCollection(dialogClear.id);
+      setFlashcards(flashcards.filter(c => {
+        if (dialogClear.id === 'default') return c.collectionId !== undefined && c.collectionId !== 'default';
+        return c.collectionId !== dialogClear.id;
+      }));
+      const stats = await getFlashcardStats().catch(() => null);
+      if (stats) setFlashcardStats(stats);
+    } catch {}
+    setDialogClear(null);
   };
 
   const handlePeriodSave = () => {
@@ -90,17 +110,17 @@ export default function FlashcardSidebar() {
     <>
       {/* Header */}
       <div style={{
-        padding: '16px 16px 12px', borderBottom: '1px solid var(--border)',
+        padding: '16px 16px 10px', borderBottom: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         flexShrink: 0,
       }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '0.02em' }}>
-          COLLECTIONS
+        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '0.03em' }}>
+          Collections
         </span>
         <button
           className="btn btn-primary"
           onClick={() => { setAddName(''); setDialogAdd(true); }}
-          style={{ padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 3 }}
+          style={{ padding: '4px 10px', borderRadius: 'var(--radius-sm)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}
           title="New collection"
         >
           <Plus size={13} /> New
@@ -108,7 +128,7 @@ export default function FlashcardSidebar() {
       </div>
 
       {/* Collection list */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '6px 0' }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
         {flashcardCollections.map(col => {
           const isActive = activeCollectionId === col.id || (!activeCollectionId && col.id === 'default');
           const isHovered = hoveredId === col.id;
@@ -120,17 +140,23 @@ export default function FlashcardSidebar() {
               onMouseEnter={() => setHoveredId(col.id)}
               onMouseLeave={() => setHoveredId(null)}
               style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '8px 16px', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '10px 14px', cursor: 'pointer',
                 background: isActive ? 'var(--primary-light)' : 'transparent',
                 borderLeft: isActive ? '3px solid var(--primary)' : '3px solid transparent',
                 transition: 'all 0.12s',
                 borderRadius: 0,
+                margin: '1px 0',
               }}
             >
+              <Layers size={15} style={{
+                color: isActive ? 'var(--primary)' : 'var(--text-muted)',
+                flexShrink: 0, opacity: isActive ? 1 : 0.5,
+              }} />
+
               <div style={{
                 fontSize: 13, fontWeight: isActive ? 600 : 400,
-                color: isActive ? 'var(--primary)' : 'var(--text-muted)',
+                color: isActive ? 'var(--primary)' : 'var(--text-secondary)',
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 flex: 1,
               }}>
@@ -139,9 +165,29 @@ export default function FlashcardSidebar() {
 
               {col.id !== 'default' && (
                 <button
+                  onClick={e => { e.stopPropagation(); openPeriod(col); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 3,
+                    padding: '3px 7px', border: '1px solid var(--border)',
+                    background: isHovered ? 'var(--bg-surface)' : 'transparent',
+                    borderRadius: 'var(--radius-sm)',
+                    cursor: 'pointer', fontSize: 10, fontWeight: 600,
+                    color: 'var(--text-muted)', flexShrink: 0,
+                    transition: 'all 0.12s',
+                    opacity: isHovered ? 1 : 0.7,
+                  }}
+                  title="Change review period"
+                >
+                  <Clock size={10} />
+                  {col.reviewPeriodDays}d
+                </button>
+              )}
+
+              {col.id !== 'default' && (
+                <button
                   onClick={e => { e.stopPropagation(); openMenu(col); }}
                   style={{
-                    padding: '2px 4px', border: 'none', background: 'none', cursor: 'pointer',
+                    padding: '3px', border: 'none', background: 'none', cursor: 'pointer',
                     color: 'var(--text-muted)', borderRadius: 'var(--radius-sm)',
                     opacity: isHovered ? 1 : 0,
                     transition: 'opacity 0.15s',
@@ -198,17 +244,18 @@ export default function FlashcardSidebar() {
             Edit name
           </button>
           <button
-            onClick={menuPeriod}
+            onClick={menuClear}
             className="btn btn-ghost"
             style={{
               display: 'flex', alignItems: 'center', gap: 10,
               padding: '10px 14px', fontSize: 13, fontWeight: 500,
               width: '100%', justifyContent: 'flex-start',
               borderRadius: 'var(--radius-md)',
+              color: 'var(--warning)',
             }}
           >
-            <Clock size={15} style={{ color: 'var(--primary)' }} />
-            Review period
+            <Eraser size={15} />
+            Clear all flashcards
           </button>
           <button
             onClick={menuRemove}
@@ -223,6 +270,25 @@ export default function FlashcardSidebar() {
           >
             <Trash2 size={15} />
             Remove collection
+          </button>
+        </div>
+      </Dialog>
+
+      {/* Clear flashcards */}
+      <Dialog open={!!dialogClear} onClose={() => setDialogClear(null)} title="Clear Flashcards" width={360}>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.5 }}>
+          Are you sure you want to delete all flashcards in <strong style={{ color: 'var(--text-primary)' }}>{dialogClear?.name}</strong>? This action cannot be undone.
+        </p>
+        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+          <button className="btn btn-ghost" onClick={() => setDialogClear(null)} style={{ fontSize: 12, padding: '6px 14px' }}>
+            Cancel
+          </button>
+          <button className="btn" onClick={handleClear} style={{
+            fontSize: 12, padding: '6px 14px',
+            background: 'var(--warning)', color: 'var(--primary-text)', border: 'none',
+            borderRadius: 'var(--radius-md)', cursor: 'pointer', fontWeight: 600,
+          }}>
+            Clear All
           </button>
         </div>
       </Dialog>

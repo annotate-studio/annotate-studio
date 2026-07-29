@@ -375,6 +375,12 @@ fn delete_flashcard(state: State<AppState>, card_id: String) -> Result<(), Strin
 }
 
 #[tauri::command]
+fn delete_flashcards_by_collection(state: State<AppState>, collection_id: String) -> Result<usize, String> {
+    let mut engine = state.spaced_rep.lock().map_err(|e| e.to_string())?;
+    Ok(engine.remove_cards_by_collection(&collection_id))
+}
+
+#[tauri::command]
 fn get_flashcard_stats(state: State<AppState>) -> Result<RepetitionStats, String> {
     let engine = state.spaced_rep.lock().map_err(|e| e.to_string())?;
     Ok(engine.stats())
@@ -476,7 +482,31 @@ fn add_ai_provider(
         },
         "groq" => AIProvider::Groq {
             api_key: api_key.ok_or("API key required for Groq")?,
-            model: model.unwrap_or_else(|| "llama3-70b-8192".into()),
+            model: model.unwrap_or_else(|| "llama-3.3-70b-versatile".into()),
+        },
+        "google-gemini" => AIProvider::GoogleGemini {
+            api_key: api_key.ok_or("API key required for Google Gemini")?,
+            model: model.unwrap_or_else(|| "gemini-2.0-flash".into()),
+        },
+        "mistral" => AIProvider::Mistral {
+            api_key: api_key.ok_or("API key required for Mistral")?,
+            model: model.unwrap_or_else(|| "mistral-large-latest".into()),
+        },
+        "together" => AIProvider::Together {
+            api_key: api_key.ok_or("API key required for Together AI")?,
+            model: model.unwrap_or_else(|| "mistralai/Mixtral-8x22B-Instruct-v0.1".into()),
+        },
+        "xai" => AIProvider::XAI {
+            api_key: api_key.ok_or("API key required for xAI")?,
+            model: model.unwrap_or_else(|| "grok-2-latest".into()),
+        },
+        "perplexity" => AIProvider::Perplexity {
+            api_key: api_key.ok_or("API key required for Perplexity")?,
+            model: model.unwrap_or_else(|| "sonar-pro".into()),
+        },
+        "cohere" => AIProvider::Cohere {
+            api_key: api_key.ok_or("API key required for Cohere")?,
+            model: model.unwrap_or_else(|| "command-r-plus".into()),
         },
         _ => return Err(format!("Unknown provider type: {}", provider_type)),
     };
@@ -507,12 +537,22 @@ fn set_default_ai_provider(state: State<AppState>, provider_type: String) -> Res
 fn get_ai_providers(state: State<AppState>) -> Result<Vec<serde_json::Value>, String> {
     let router = state.ai_router.lock().map_err(|e| e.to_string())?;
     let providers: Vec<serde_json::Value> = router.providers().iter().enumerate().map(|(i, p)| {
+        let base = |model: &str| serde_json::json!({ "type": p.type_name(), "model": model, "configured": true, "active": i == 0 });
         match p {
-            AIProvider::OpenAI { model, .. } | AIProvider::Anthropic { model, .. }
-                | AIProvider::DeepSeek { model, .. } | AIProvider::Groq { model, .. } => {
-                serde_json::json!({ "type": p.type_name(), "model": model, "configured": true, "active": i == 0 })
+            AIProvider::OpenAI { model, .. } => base(model),
+            AIProvider::Anthropic { model, .. } => base(model),
+            AIProvider::DeepSeek { model, .. } => base(model),
+            AIProvider::Groq { model, .. } => base(model),
+            AIProvider::GoogleGemini { model, .. } => base(model),
+            AIProvider::Mistral { model, .. } => base(model),
+            AIProvider::Together { model, .. } => base(model),
+            AIProvider::XAI { model, .. } => base(model),
+            AIProvider::Perplexity { model, .. } => base(model),
+            AIProvider::Cohere { model, .. } => base(model),
+            AIProvider::Ollama { endpoint, model } => {
+                serde_json::json!({ "type": p.type_name(), "endpoint": endpoint, "model": model, "configured": true, "active": i == 0 })
             }
-            AIProvider::Ollama { endpoint, model } | AIProvider::OpenRouter { endpoint, model, .. } => {
+            AIProvider::OpenRouter { endpoint, model, .. } => {
                 serde_json::json!({ "type": p.type_name(), "endpoint": endpoint, "model": model, "configured": true, "active": i == 0 })
             }
         }
@@ -754,6 +794,7 @@ fn main() {
             get_all_flashcards,
             review_flashcard,
             delete_flashcard,
+            delete_flashcards_by_collection,
             get_flashcard_stats,
             restore_all_flashcards,
             get_cards_by_filter,

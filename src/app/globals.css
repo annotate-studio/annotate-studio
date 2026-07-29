@@ -23,7 +23,7 @@
   --border: #E2E8F0;
   --border-subtle: rgba(226, 232, 240, 0.5);
   --border-hover: #CBD5E1;
-  --border-focus: #2563EB;
+  --border-focus: #d8d8d8;
 
   --danger: #EF4444;
   --danger-light: #FEE2E2;
@@ -242,7 +242,6 @@ body::before {
   transition: border-color 0.2s ease;
 }
 .input:focus {
-  border-color: var(--border-focus);
   background: color-mix(in srgb, var(--bg-card) 98%, var(--primary));
 }
 .input::placeholder { color: var(--text-muted); }

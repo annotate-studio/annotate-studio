@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Plus, NotebookText, ChevronRight, Sparkles, RotateCcw, ListFilter, Clock, BarChart3, Layers, RefreshCw } from 'lucide-react';
+import { Plus, NotebookText, ChevronRight, Sparkles, RotateCcw, ListFilter, Clock, BarChart3, Layers, RefreshCw, FileText, Zap, ChevronDown } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import FlashcardLayout from './FlashcardLayout';
 import Dialog from '@/components/ui/Dialog';
@@ -9,7 +9,8 @@ import {
   getDueCards, getAllFlashcards, reviewFlashcard, deleteFlashcard, getFlashcardStats,
   generateFlashcard, saveFlashcard, restoreAllFlashcards, getCardsByFilter,
   checkDueFlashcards, sendStudyNotification, requestNotificationPermission,
-  type Flashcard, type ReviewQuality,
+  getAllFiles, readFile, readFileBase64, getAIProviders,
+  type Flashcard, type ReviewQuality, type StudyFile,
 } from '@/lib/tauri-commands';
 
 const STAT_META = [
@@ -41,6 +42,14 @@ function FlashcardsTab() {
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
   const addRef = useRef<HTMLInputElement>(null);
 
+  const [workspaceFiles, setWorkspaceFiles] = useState<StudyFile[]>([]);
+  const [genProviderOpts, setGenProviderOpts] = useState<{ type: string; model: string; label: string }[]>([]);
+  const [genProviderMenu, setGenProviderMenu] = useState(false);
+  const [genAutocompleteOpen, setGenAutocompleteOpen] = useState(false);
+  const [genAutocompletePrefix, setGenAutocompletePrefix] = useState('');
+  const [genAutocompleteIdx, setGenAutocompleteIdx] = useState(0);
+  const genInputRef = useRef<HTMLTextAreaElement>(null);
+
   // Filter dialog state
   const [filterOpen, setFilterOpen] = useState(false);
   const [filterDue, setFilterDue] = useState(true);
@@ -66,7 +75,7 @@ function FlashcardsTab() {
         } else if (due === 0) {
           setNotifiedDue(false);
         }
-      } catch {}
+      } catch { }
     }, 60000);
     return () => clearInterval(interval);
   }, [notifiedDue]);
@@ -93,6 +102,48 @@ function FlashcardsTab() {
   useEffect(() => { useStore.getState().loadCollectionsFromDisk(); }, []);
   useEffect(() => { setReviewedIds(new Set()); }, [mode, activeCollectionId]);
 
+  useEffect(() => {
+    getAllFiles().then(setWorkspaceFiles).catch(() => { });
+    getAIProviders().then((providers) => {
+      setGenProviderOpts(providers.map((p) => ({
+        type: p.type, model: p.model,
+        label: p.endpoint ? `${p.type} · ${p.model} · ${p.endpoint}` : `${p.type} · ${p.model}`,
+      })));
+    }).catch(() => { });
+  }, []);
+
+  const docNames = useMemo(() => workspaceFiles.map(f => f.name), [workspaceFiles]);
+
+  const filteredDocNames = useMemo(() => {
+    if (!genAutocompletePrefix) return docNames;
+    return docNames.filter(n => n.toLowerCase().includes(genAutocompletePrefix.toLowerCase()));
+  }, [docNames, genAutocompletePrefix]);
+
+  const handleGenInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setGenerateContent(val);
+    const atPos = val.lastIndexOf('@');
+    if (atPos >= 0 && (atPos === 0 || val[atPos - 1] === ' ')) {
+      const after = val.slice(atPos + 1);
+      if (!after.includes(' ')) {
+        setGenAutocompletePrefix(after);
+        setGenAutocompleteOpen(true);
+        setGenAutocompleteIdx(0);
+        return;
+      }
+    }
+    setGenAutocompleteOpen(false);
+  }, []);
+
+  const insertDocName = useCallback((name: string) => {
+    const atPos = generateContent.lastIndexOf('@', generateContent.length - genAutocompletePrefix.length - 1);
+    if (atPos >= 0) {
+      setGenerateContent(generateContent.slice(0, atPos + 1) + name + ' ');
+    }
+    setGenAutocompleteOpen(false);
+    genInputRef.current?.focus();
+  }, [generateContent, genAutocompletePrefix]);
+
   async function loadCards() {
     setLoading(true);
     try {
@@ -114,7 +165,7 @@ function FlashcardsTab() {
   const handleRestoreAll = useCallback(async () => {
     const period = currentCollection?.reviewPeriodDays;
     setRestoring(true);
-    try { await restoreAllFlashcards(period); } catch {}
+    try { await restoreAllFlashcards(period); } catch { }
     setReviewedIds(new Set());
     await loadCards();
     setRestoring(false);
@@ -163,21 +214,25 @@ function FlashcardsTab() {
     setShowAddForm(false);
   }, [newQuestion, newAnswer, activeCollectionId]);
 
+  const [genSelectedProvider, setGenSelectedProvider] = useState<string | undefined>();
+  const [genSourceFile, setGenSourceFile] = useState<string | undefined>();
+
   const handleGenerate = useCallback(async () => {
     if (!generateContent.trim()) return;
     setGenerating(true);
     setGenError('');
     try {
-      const cards = await generateFlashcard(generateContent.trim(), undefined, activeCollectionId ?? undefined);
+      const cards = await generateFlashcard(generateContent.trim(), genSourceFile, activeCollectionId ?? undefined);
       if (cards.length === 0) { setGenError('AI returned no flashcards. Try different content.'); return; }
       setFlashcards([...useStore.getState().flashcards, ...cards]);
       setGenerateContent('');
+      setGenSourceFile(undefined);
       setShowGenerate(false);
     } catch (err) {
       setGenError(String(err));
     }
     setGenerating(false);
-  }, [generateContent, activeCollectionId]);
+  }, [generateContent, genSourceFile, activeCollectionId]);
 
   useEffect(() => {
     if (showAddForm && addRef.current) addRef.current.focus();
@@ -267,23 +322,92 @@ function FlashcardsTab() {
 
       {/* Generate form */}
       {showGenerate && (
-        <div className="card" style={{ padding: 16, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
-          <input
+        <div className="card" style={{ padding: 16, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0, position: 'relative' }}>
+          <textarea
+            ref={genInputRef}
             value={generateContent}
-            onChange={e => { setGenerateContent(e.target.value); setGenError(''); }}
-            placeholder="Paste study content to generate a flashcard..."
+            onChange={handleGenInputChange}
+            onKeyDown={e => {
+              if (genAutocompleteOpen) {
+                if (e.key === 'ArrowDown') { e.preventDefault(); setGenAutocompleteIdx(i => Math.min(i + 1, filteredDocNames.length - 1)); return; }
+                if (e.key === 'ArrowUp') { e.preventDefault(); setGenAutocompleteIdx(i => Math.max(i - 1, 0)); return; }
+                if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertDocName(filteredDocNames[genAutocompleteIdx]); return; }
+                if (e.key === 'Escape') { setGenAutocompleteOpen(false); return; }
+              }
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !generating) { e.preventDefault(); handleGenerate(); }
+            }}
+            placeholder="Paste study content or type @ to reference a document..."
             className="input"
-            style={{ flex: 1 }}
-            onKeyDown={e => e.key === 'Enter' && !generating && handleGenerate()}
+            style={{ flex: 1, minHeight: 80, resize: 'vertical' }}
             disabled={generating}
           />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button className="btn btn-primary" onClick={handleGenerate} disabled={generating}>
-              {generating ? 'Generating...' : 'Generate'}
-            </button>
-            <button className="btn btn-ghost" onClick={() => { setShowGenerate(false); setGenError(''); }}>
-              Cancel
-            </button>
+
+          {/* @autocomplete dropdown */}
+          {genAutocompleteOpen && filteredDocNames.length > 0 && (
+            <div style={{
+              position: 'absolute', bottom: '100%', left: 16, right: 16, zIndex: 50,
+              background: 'var(--bg-card)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-md)', padding: 4, maxHeight: 200, overflow: 'auto',
+              boxShadow: '0 -4px 16px rgba(0,0,0,0.12)',
+              marginBottom: 4,
+            }}>
+              {filteredDocNames.map((name, i) => (
+                <div key={name} onClick={() => insertDocName(name)}
+                  style={{
+                    padding: '6px 12px', fontSize: 13, borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    background: i === genAutocompleteIdx ? 'var(--primary-light)' : 'transparent',
+                    color: i === genAutocompleteIdx ? 'var(--primary)' : 'var(--text-secondary)',
+                  }}>
+                  <FileText size={13} /> {name}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button className="btn btn-primary" onClick={handleGenerate} disabled={generating}>
+                {generating ? 'Generating...' : 'Generate'}
+              </button>
+              <button className="btn btn-ghost" onClick={() => { setShowGenerate(false); setGenError(''); setGenSourceFile(undefined); setGenSelectedProvider(undefined); }}>
+                Cancel
+              </button>
+            </div>
+
+            {/* Provider selector */}
+            <div style={{ position: 'relative' }}>
+              <button className="btn btn-ghost" onClick={() => setGenProviderMenu(v => !v)}
+                style={{ fontSize: 11, padding: '4px 10px', gap: 3, display: 'flex', alignItems: 'center' }}>
+                <Zap size={12} /> {genSelectedProvider || 'AI Provider'}
+                <ChevronDown size={11} />
+              </button>
+              {genProviderMenu && (
+                <div style={{
+                  position: 'absolute', top: '100%', right: 0, zIndex: 50,
+                  background: 'var(--bg-card)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)', padding: 4, minWidth: 200,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)', marginTop: 4,
+                }}>
+                  {genProviderOpts.length === 0 && (
+                    <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-muted)' }}>
+                      No providers. Add one in Settings.
+                    </div>
+                  )}
+                  {genProviderOpts.map((opt, i) => (
+                    <button key={i} onClick={() => { setGenSelectedProvider(opt.label); setGenProviderMenu(false); }}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left', padding: '7px 14px', fontSize: 12,
+                        border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'inherit',
+                        background: genSelectedProvider === opt.label ? 'var(--primary-light)' : 'transparent',
+                        color: genSelectedProvider === opt.label ? 'var(--primary)' : 'var(--text-secondary)',
+                      }}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           {genError && (
             <div style={{ fontSize: 12, color: 'var(--danger)', padding: '6px 10px', background: 'var(--danger-light)', borderRadius: 'var(--radius-sm)' }}>
@@ -293,31 +417,36 @@ function FlashcardsTab() {
         </div>
       )}
 
-      {/* Enhanced stats cards */}
+      {/* Enlarged stats cards */}
       {flashcardStats && (
-        <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 14, marginBottom: 24, flexShrink: 0 }}>
           {STAT_META.map(s => {
             const value = flashcardStats[s.key];
             const Icon = s.icon;
             return (
               <div key={s.key} style={{
-                flex: 1, minWidth: 100,
+                flex: 1, minWidth: 110,
                 background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)',
-                border: '1px solid var(--border)', padding: '14px 16px',
-                display: 'flex', alignItems: 'center', gap: 12,
-              }}>
+                border: '1px solid var(--border)', padding: '18px 20px',
+                display: 'flex', alignItems: 'center', gap: 14,
+                transition: 'transform 0.15s, box-shadow 0.15s',
+                cursor: 'default',
+              }}
+                onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)'; }}
+                onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; }}
+              >
                 <div style={{
-                  width: 40, height: 40, borderRadius: 'var(--radius-md)',
+                  width: 48, height: 48, borderRadius: 'var(--radius-md)',
                   background: `${s.color}18`, display: 'flex',
                   alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                 }}>
-                  <Icon size={18} style={{ color: s.color }} />
+                  <Icon size={22} style={{ color: s.color }} />
                 </div>
                 <div>
-                  <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.1 }}>
+                  <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.1 }}>
                     {value}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{s.label}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>{s.label}</div>
                 </div>
               </div>
             );

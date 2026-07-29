@@ -163,6 +163,15 @@ impl SpacedRepetitionEngine {
         removed
     }
 
+    pub fn remove_cards_by_collection(&mut self, collection_id: &str) -> usize {
+        let len_before = self.cards.len();
+        let target = if collection_id == "default" { None } else { Some(collection_id.to_string()) };
+        self.cards.retain(|c| c.collection_id != target);
+        let removed = len_before - self.cards.len();
+        if removed > 0 { self.save_to_disk(); }
+        removed
+    }
+
     pub fn due_cards(&self) -> Vec<&Flashcard> {
         self.cards.iter().filter(|c| c.is_due()).collect()
     }

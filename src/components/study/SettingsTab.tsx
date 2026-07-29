@@ -268,13 +268,25 @@ export default function SettingsTab() {
 
             <div className="card" style={{ padding: 20 }}>
               <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 12 }}>Add Provider</div>
-              <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
-                {['openai', 'anthropic', 'ollama', 'deepseek', 'openrouter', 'groq'].map((p) => (
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: 6 }}>POPULAR</div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                {['openai', 'anthropic', 'google-gemini', 'mistral', 'groq'].map((p) => (
                   <button key={p} onClick={() => { setProviderType(p); setModel(''); setApiKey(''); setEndpoint('http://localhost:11434'); }}
                     className={`btn ${providerType === p ? 'btn-primary' : 'btn-ghost'}`}
                     style={{ fontSize: 12, textTransform: 'capitalize' }}
                   >
-                    {p}
+                    {p === 'google-gemini' ? 'Gemini' : p}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: 6, marginTop: 8 }}>MORE</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {['deepseek', 'openrouter', 'together', 'xai', 'perplexity', 'cohere', 'ollama'].map((p) => (
+                  <button key={p} onClick={() => { setProviderType(p); setModel(''); setApiKey(''); setEndpoint('http://localhost:11434'); }}
+                    className={`btn ${providerType === p ? 'btn-primary' : 'btn-ghost'}`}
+                    style={{ fontSize: 12, textTransform: 'capitalize' }}
+                  >
+                    {p === 'xai' ? 'xAI' : p === 'together' ? 'Together' : p}
                   </button>
                 ))}
               </div>
@@ -298,7 +310,10 @@ export default function SettingsTab() {
                   <input className="input" value={model} onChange={(e) => setModel(e.target.value)}
                     placeholder={{
                       openai: 'gpt-4o', anthropic: 'claude-sonnet-4-20250514', deepseek: 'deepseek-chat',
-                      openrouter: 'openrouter/auto', groq: 'llama3-70b-8192', ollama: 'llama3',
+                      openrouter: 'openrouter/auto', groq: 'llama-3.3-70b-versatile', ollama: 'llama3',
+                      'google-gemini': 'gemini-2.0-flash', mistral: 'mistral-large-latest',
+                      together: 'mistralai/Mixtral-8x22B-Instruct-v0.1', xai: 'grok-2-latest',
+                      perplexity: 'sonar-pro', cohere: 'command-r-plus',
                     }[providerType] || 'model-name'} />
                 </div>
               </div>

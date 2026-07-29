@@ -9,6 +9,12 @@ pub enum AIProvider {
     DeepSeek { api_key: String, model: String },
     OpenRouter { api_key: String, endpoint: String, model: String },
     Groq { api_key: String, model: String },
+    GoogleGemini { api_key: String, model: String },
+    Mistral { api_key: String, model: String },
+    Together { api_key: String, model: String },
+    XAI { api_key: String, model: String },
+    Perplexity { api_key: String, model: String },
+    Cohere { api_key: String, model: String },
 }
 
 impl AIProvider {
@@ -20,6 +26,12 @@ impl AIProvider {
             AIProvider::DeepSeek { .. } => "deepseek",
             AIProvider::OpenRouter { .. } => "openrouter",
             AIProvider::Groq { .. } => "groq",
+            AIProvider::GoogleGemini { .. } => "google-gemini",
+            AIProvider::Mistral { .. } => "mistral",
+            AIProvider::Together { .. } => "together",
+            AIProvider::XAI { .. } => "xai",
+            AIProvider::Perplexity { .. } => "perplexity",
+            AIProvider::Cohere { .. } => "cohere",
         }
     }
 }
@@ -133,6 +145,24 @@ impl AIRouter {
             AIProvider::Groq { api_key, model } => {
                 self.call_openai_compat("https://api.groq.com/openai/v1/chat/completions", api_key, model, request).await
             }
+            AIProvider::GoogleGemini { api_key, model } => {
+                self.call_openai_compat("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", api_key, model, request).await
+            }
+            AIProvider::Mistral { api_key, model } => {
+                self.call_openai_compat("https://api.mistral.ai/v1/chat/completions", api_key, model, request).await
+            }
+            AIProvider::Together { api_key, model } => {
+                self.call_openai_compat("https://api.together.xyz/v1/chat/completions", api_key, model, request).await
+            }
+            AIProvider::XAI { api_key, model } => {
+                self.call_openai_compat("https://api.x.ai/v1/chat/completions", api_key, model, request).await
+            }
+            AIProvider::Perplexity { api_key, model } => {
+                self.call_openai_compat("https://api.perplexity.ai/chat/completions", api_key, model, request).await
+            }
+            AIProvider::Cohere { api_key, model } => {
+                self.call_openai_compat("https://api.cohere.com/v2/chat/completions", api_key, model, request).await
+            }
         }
     }
 
@@ -166,10 +196,15 @@ impl AIRouter {
             .await
             .map_err(|e| format!("Request to {} failed: {}", url, e))?;
 
-        let json: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| format!("Failed to read response body: {}", e))?;
+
+        if !status.is_success() {
+            return Err(format!("{} returned HTTP {}: {}", url, status, text));
+        }
+
+        let json: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| format!("Failed to parse response from {}: {} — body: {}", url, e, &text[..text.len().min(500)]))?;
 
         if let Some(error) = json.get("error") {
             return Err(format!(
@@ -187,6 +222,12 @@ impl AIRouter {
         let provider_name = if url.contains("deepseek") { "deepseek" }
             else if url.contains("groq") { "groq" }
             else if url.contains("openrouter") { "openrouter" }
+            else if url.contains("googleapis") || url.contains("generativelanguage") { "google-gemini" }
+            else if url.contains("mistral") { "mistral" }
+            else if url.contains("together") { "together" }
+            else if url.contains("x.ai") { "xai" }
+            else if url.contains("perplexity") { "perplexity" }
+            else if url.contains("cohere") { "cohere" }
             else { "openai" };
 
         Ok(AIResponse {

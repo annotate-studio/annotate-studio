@@ -155,6 +155,10 @@ export async function deleteFlashcard(cardId: string): Promise<void> {
   return invoke('delete_flashcard', { cardId });
 }
 
+export async function deleteFlashcardsByCollection(collectionId: string): Promise<number> {
+  return invoke('delete_flashcards_by_collection', { collectionId });
+}
+
 export async function getFlashcardStats(): Promise<RepetitionStats> {
   return invoke('get_flashcard_stats');
 }

@@ -16,7 +16,6 @@ const QUOTES = [
   'Your limitation—it\'s only your imagination.',
   'Great things never come from comfort zones.',
   'Dream it. Wish it. Do it.',
-  'Talent without working hard is nothing. — Cristiano Ronaldo',
   'Push yourself, because no one else is going to do it for you.',
   'Small progress is still progress.',
   'Don\'t stop when you\'re tired. Stop when you\'re done.',
