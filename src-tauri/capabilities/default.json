@@ -13,6 +13,15 @@
     "notification:default",
     "notification:allow-request-permission",
     "notification:allow-is-permission-granted",
-    "notification:allow-notify"
+    "notification:allow-notify",
+    "dialog:default",
+    "dialog:allow-save",
+    "fs:default",
+    "fs:allow-write-file",
+    "fs:allow-home-write",
+    "fs:allow-appdata-write",
+    "fs:allow-download-write",
+    "fs:allow-desktop-write",
+    "fs:allow-document-write"
   ]
 }

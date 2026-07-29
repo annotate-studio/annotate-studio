@@ -13,6 +13,8 @@ import { ViewportPluginPackage, Viewport } from '@embedpdf/plugin-viewport/react
 import { ScrollPluginPackage, Scroller } from '@embedpdf/plugin-scroll/react';
 import { RenderPluginPackage, RenderLayer } from '@embedpdf/plugin-render/react';
 import { AnnotationPluginPackage, AnnotationLayer, useAnnotation, useAnnotationCapability } from '@embedpdf/plugin-annotation/react';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeFile } from '@tauri-apps/plugin-fs';
 import { PdfAnnotationSubtype, PdfAnnotationLineEnding } from '@embedpdf/models';
 import { ZoomPluginPackage, useZoom } from '@embedpdf/plugin-zoom/react';
 import { ExportPluginPackage, useExport } from '@embedpdf/plugin-export/react';
@@ -353,16 +355,20 @@ function ActiveToolbar({
       <button onClick={async () => {
         const fn = exportFnRef.current;
         if (!fn) return;
+
         const data = await fn();
         if (!data) return;
-        
-        const blob = new Blob([data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${safeId}-annotated.pdf`;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+        try {
+          const path = await save({
+            defaultPath: `${safeId}-annotated.pdf`,
+            filters: [{ name: 'PDF', extensions: ['pdf'] }],
+          });
+          if (!path) return;
+          await writeFile(path, data);
+        } catch (e) {
+          console.error('[Export] Save failed:', e);
+        }
       }}
         style={{ padding: '4px 10px', fontSize: 11, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
         <Download size={11} /> Export
@@ -420,10 +426,10 @@ function DocumentCanvas({
 
   // Sync the selected tool to the EmbedPDF annotation provider.
   // Deselect any selected annotation first so switching tools feels clean.
+  // Lock annotations when a non-select tool is active so strokes are not selectable.
   useEffect(() => {
     const ap = annotationProvidesRef.current;
     if (!ap) return;
-    ap.deselectAnnotation();
     ap.setActiveTool(toolToEmbedId[tool] ?? null);
   }, [tool]);
 
@@ -439,15 +445,9 @@ function DocumentCanvas({
       if (!target) return;
       // Don't deselect when interacting with floating menus or context menus
       if (target.closest('[data-keep-selection]')) return;
-      // Walk up from the click target to the viewer — if we hit a page
-      // (white background) let the AnnotationLayer handle it.
-      let node: Element | null = target;
-      while (node && node !== el) {
-        const bg = (node as HTMLElement).style?.background;
-        if (bg === '#fff' || bg === 'white' || bg === '#ffffff') return;
-        node = node.parentElement;
-      }
-      // Click landed on the grey zone → force deselection
+      // Click inside a page wrapper → let the AnnotationLayer handle it.
+      if (target.closest('[data-page-wrapper]')) return;
+      // Click landed on the grey zone outside any page → force deselection
       ap.deselectAnnotation();
     };
     el.addEventListener('pointerdown', handler);
@@ -593,6 +593,13 @@ function DocumentCanvas({
 
   useEffect(() => {
     exportFnRef.current = async () => {
+      const ap = annotationProvidesRef.current;
+      if (ap) {
+        try {
+          const commitTask = (ap as any).commit?.();
+          if (commitTask?.toPromise) await commitTask.toPromise();
+        } catch {}
+      }
       const ep = exportProvidesRef.current;
       if (!ep) return null;
       try {
@@ -678,17 +685,18 @@ function DocumentCanvas({
 
   return (
     <>
+      <style>{`.annotation-layer-locked * { pointer-events: none !important; }`}</style>
       <Viewport documentId={documentId}>
         <Scroller 
           documentId={documentId} 
           renderPage={(page: { pageIndex: number; width: number; height: number }) => (
             <PagePointerProvider key={page.pageIndex} documentId={documentId} pageIndex={page.pageIndex}>
-              <div style={{
+              <div data-page-wrapper style={{
                 position: 'relative', width: page.width, height: page.height,
                 boxShadow: '0 2px 8px rgba(0,0,0,0.3)', margin: '0 auto', background: '#fff',
               }}>
                 <RenderLayer documentId={documentId} pageIndex={page.pageIndex} style={{ pointerEvents: 'none' }} />
-                <div style={{ pointerEvents: tool === 'select' ? undefined : 'none' }}>
+                <div className={tool !== 'select' && tool !== 'text' ? 'annotation-layer-locked' : undefined}>
                   <SelectionLayer documentId={documentId} pageIndex={page.pageIndex} />
                   <AnnotationLayer documentId={documentId} pageIndex={page.pageIndex} selectionOutlineColor="#2563EB" />
                 </div>
