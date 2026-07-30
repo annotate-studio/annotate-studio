@@ -152,7 +152,6 @@ export default function MotivationTab() {
     if (renameValue.trim()) {
       const s = motivationSessions.find((s) => s.id === motivationActiveSessionId);
       if (s) { s.name = renameValue.trim(); }
-      try { localStorage.setItem('motivation-sessions', JSON.stringify(motivationSessions)); } catch {}
     }
     setRenameDialogOpen(false);
   };

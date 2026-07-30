@@ -240,19 +240,9 @@ function saveChatSessionsSnapshot(get: () => AppState) {
   persistChatSessions(sessions as unknown as Record<string, unknown>[]);
 }
 
-let _saveMotivationSessions: ((sessions: Record<string, unknown>[]) => Promise<void>) | null = null;
-
-async function persistMotivationSessionsToDb(sessions: Record<string, unknown>[]) {
-  try { localStorage.setItem('motivation-sessions', JSON.stringify(sessions)); } catch {}
-  if (!_saveMotivationSessions) {
-    try { _saveMotivationSessions = (await import('./tauri-commands')).saveMotivationSessions; } catch { return; }
-  }
-  _saveMotivationSessions(sessions).catch(() => {});
-}
-
 function persistMotivationSessions(get: () => AppState) {
   const sessions = get().motivationSessions;
-  persistMotivationSessionsToDb(sessions as unknown as Record<string, unknown>[]);
+  try { localStorage.setItem('motivation-sessions', JSON.stringify(sessions)); } catch {}
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -721,21 +711,7 @@ export const useStore = create<AppState>((set, get) => ({
     persistMotivationSessions(get);
   },
   clearMotivationMessages: () => set({ motivationMessages: [] }),
-  loadMotivationSessions: async () => {
-    try {
-      const { loadMotivationSessions } = await import('./tauri-commands');
-      const entries = await loadMotivationSessions() as any[];
-      if (entries.length > 0) {
-        const first = entries[0];
-        set({
-          motivationSessions: entries as any,
-          motivationActiveSessionId: first.id,
-          motivationMessages: first.messages || [],
-        });
-        return;
-      }
-    } catch {}
-    // Fallback to localStorage
+  loadMotivationSessions: () => {
     try {
       const raw = localStorage.getItem('motivation-sessions');
       if (raw) {
@@ -746,9 +722,23 @@ export const useStore = create<AppState>((set, get) => ({
             motivationActiveSessionId: sessions[0].id,
             motivationMessages: sessions[0].messages || [],
           });
+          return;
         }
       }
     } catch {}
+    // No sessions exist — create a default one
+    const defaultSession: ChatSession = {
+      id: crypto.randomUUID(),
+      name: 'Session 1',
+      messages: [],
+      createdAt: Date.now(),
+    };
+    set({
+      motivationSessions: [defaultSession],
+      motivationActiveSessionId: defaultSession.id,
+      motivationMessages: [],
+    });
+    try { localStorage.setItem('motivation-sessions', JSON.stringify([defaultSession])); } catch {}
   },
 
   // Documents
