@@ -65,7 +65,7 @@ export default function MotivationTab() {
     getAIProviders().then((providers) => {
       const opts = providers.map((p) => ({
         type: p.type, model: p.model,
-        label: p.endpoint ? `${p.type} (${p.model} · ${p.endpoint})` : `${p.type} · ${p.model}`,
+        label: p.model,
       }));
       setProviderOptions(opts);
       if (opts.length > 0 && !opts.some((o) => o.label === selectedModel)) {
@@ -108,17 +108,23 @@ export default function MotivationTab() {
 
   const handleSend = async () => {
     if (!input.trim()) return;
-    const userMsg: ChatMessage = { role: 'user', content: input, timestamp: Date.now() };
+    const userContent = input;
+    const userMsg: ChatMessage = { role: 'user', content: userContent, timestamp: Date.now() };
     addMotivationMessage(userMsg);
     setInput('');
     setLoading(true);
 
     try {
       const { aiChat } = await import('@/lib/tauri-commands');
+      // Include full conversation history for context (slices off the just-added user message)
+      const history = useStore.getState().motivationMessages
+        .slice(0, -1)
+        .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
       const res = await aiChat(
         [
-          { role: 'system', content: 'You are a compassionate and professional study counselor. Provide warm, heart-felt encouragement, mental health advice, and study motivation. Be supportive, understanding, and practical. Keep responses concise (under 150 words) and always end with an uplifting note. Use occasional emojis to convey warmth.' },
-          { role: 'user', content: input },
+          { role: 'system', content: 'You are a compassionate, professional therapy and motivation assistant. Provide warm, heartfelt encouragement, mental health support, study motivation, and practical coping strategies. Be supportive, understanding, and non-judgmental. Use therapeutic techniques like reflective listening, validation, and gentle reframing. Keep responses concise (under 150 words). End with an uplifting note or an open-ended question to continue the conversation. Use occasional emojis to convey warmth.' },
+          ...history,
+          { role: 'user', content: userContent },
         ],
         'Custom',
         'study-counselor'
@@ -236,7 +242,7 @@ export default function MotivationTab() {
   );
 
   return (
-    <div style={{ height: '100%', display: 'flex', gap: 24, padding: 24, flexDirection: isSmall ? 'column' : 'row', overflow: 'auto' }}>
+    <div style={{ height: '100%', display: 'flex', gap: motivationChatMaximized ? 0 : 24, padding: motivationChatMaximized ? 0 : 24, flexDirection: isSmall ? 'column' : 'row', overflow: 'auto' }}>
       {/* Quote & encouragement — hidden when chatbot is maximized */}
       {!motivationChatMaximized && (
         <div style={{ flexGrow: 1, flexShrink: 1, flexBasis: '0%', display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -292,12 +298,14 @@ export default function MotivationTab() {
 
       {/* AI Counselor Chat — full area when maximized */}
       <div className="card" style={{
-        flexGrow: motivationChatMaximized ? 1 : 0,
+        flexGrow: 1,
         flexShrink: 0,
-        flexBasis: motivationChatMaximized ? '0%' : (isSmall ? '100%' : '460px'),
+        flexBasis: motivationChatMaximized ? '100%' : (isSmall ? '100%' : '460px'),
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        width: motivationChatMaximized || isSmall ? '100%' : 460,
-        maxWidth: isSmall ? '100%' : 460,
+        width: motivationChatMaximized ? '100%' : (isSmall ? '100%' : 460),
+        maxWidth: motivationChatMaximized ? '100%' : (isSmall ? '100%' : 460),
+        borderRadius: motivationChatMaximized ? 0 : undefined,
+        border: motivationChatMaximized ? 'none' : undefined,
       }}>
         {/* Header */}
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>

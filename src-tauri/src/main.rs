@@ -24,6 +24,7 @@ struct AppState {
     collections_path: Mutex<String>,
     canvas_state_path: Mutex<String>,
     chat_sessions_path: Mutex<String>,
+    motivation_sessions_path: Mutex<String>,
 }
 
 // ── Utilities ────────────────────────────────────────────────────────
@@ -699,6 +700,20 @@ fn load_chat_sessions(state: State<AppState>) -> Result<Vec<serde_json::Value>, 
     Ok(load_json(&path))
 }
 
+// ── Motivation Sessions Persistence ─────────────────────────────────
+
+#[tauri::command]
+fn save_motivation_sessions(state: State<AppState>, sessions: Vec<serde_json::Value>) -> Result<(), String> {
+    let path = state.motivation_sessions_path.lock().map_err(|e| e.to_string())?;
+    save_json(&path, &sessions)
+}
+
+#[tauri::command]
+fn load_motivation_sessions(state: State<AppState>) -> Result<Vec<serde_json::Value>, String> {
+    let path = state.motivation_sessions_path.lock().map_err(|e| e.to_string())?;
+    Ok(load_json(&path))
+}
+
 // ── App Entry ───────────────────────────────────────────────────────
 
 fn main() {
@@ -750,6 +765,12 @@ fn main() {
         std::fs::write(&chat_sessions_json, "[]").ok();
     }
 
+    // Motivation sessions persistence
+    let motivation_sessions_json = workspace.join("motivation_sessions.json");
+    if !motivation_sessions_json.exists() {
+        std::fs::write(&motivation_sessions_json, "[]").ok();
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
@@ -767,6 +788,7 @@ fn main() {
             collections_path: Mutex::new(collections_json.to_string_lossy().to_string()),
             canvas_state_path: Mutex::new(canvas_state_path.to_string_lossy().to_string()),
             chat_sessions_path: Mutex::new(chat_sessions_json.to_string_lossy().to_string()),
+            motivation_sessions_path: Mutex::new(motivation_sessions_json.to_string_lossy().to_string()),
         })
         .invoke_handler(tauri::generate_handler![
             // File system
@@ -827,6 +849,9 @@ fn main() {
             // Chat sessions
             save_chat_sessions,
             load_chat_sessions,
+            // Motivation sessions
+            save_motivation_sessions,
+            load_motivation_sessions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

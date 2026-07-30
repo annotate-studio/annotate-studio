@@ -240,9 +240,19 @@ function saveChatSessionsSnapshot(get: () => AppState) {
   persistChatSessions(sessions as unknown as Record<string, unknown>[]);
 }
 
+let _saveMotivationSessions: ((sessions: Record<string, unknown>[]) => Promise<void>) | null = null;
+
+async function persistMotivationSessionsToDb(sessions: Record<string, unknown>[]) {
+  try { localStorage.setItem('motivation-sessions', JSON.stringify(sessions)); } catch {}
+  if (!_saveMotivationSessions) {
+    try { _saveMotivationSessions = (await import('./tauri-commands')).saveMotivationSessions; } catch { return; }
+  }
+  _saveMotivationSessions(sessions).catch(() => {});
+}
+
 function persistMotivationSessions(get: () => AppState) {
   const sessions = get().motivationSessions;
-  try { localStorage.setItem('motivation-sessions', JSON.stringify(sessions)); } catch {}
+  persistMotivationSessionsToDb(sessions as unknown as Record<string, unknown>[]);
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -521,7 +531,7 @@ export const useStore = create<AppState>((set, get) => ({
   clearChat: () => set({ chatMessages: [] }),
   chatLoading: false,
   setChatLoading: (loading) => set({ chatLoading: loading }),
-  selectedModel: 'gpt-4o',
+  selectedModel: '',
   setSelectedModel: (model) => set({ selectedModel: model }),
   chatSessions: [],
   activeSessionId: null,
@@ -711,17 +721,32 @@ export const useStore = create<AppState>((set, get) => ({
     persistMotivationSessions(get);
   },
   clearMotivationMessages: () => set({ motivationMessages: [] }),
-  loadMotivationSessions: () => {
+  loadMotivationSessions: async () => {
+    try {
+      const { loadMotivationSessions } = await import('./tauri-commands');
+      const entries = await loadMotivationSessions() as any[];
+      if (entries.length > 0) {
+        const first = entries[0];
+        set({
+          motivationSessions: entries as any,
+          motivationActiveSessionId: first.id,
+          motivationMessages: first.messages || [],
+        });
+        return;
+      }
+    } catch {}
+    // Fallback to localStorage
     try {
       const raw = localStorage.getItem('motivation-sessions');
       if (raw) {
         const sessions = JSON.parse(raw) as ChatSession[];
-        const first = sessions[0];
-        set({
-          motivationSessions: sessions,
-          motivationActiveSessionId: first?.id || null,
-          motivationMessages: first?.messages || [],
-        });
+        if (sessions.length > 0) {
+          set({
+            motivationSessions: sessions,
+            motivationActiveSessionId: sessions[0].id,
+            motivationMessages: sessions[0].messages || [],
+          });
+        }
       }
     } catch {}
   },

@@ -333,6 +333,14 @@ export async function loadChatSessions(): Promise<Record<string, unknown>[]> {
   return invoke('load_chat_sessions');
 }
 
+export async function saveMotivationSessions(sessions: Record<string, unknown>[]): Promise<void> {
+  return invoke('save_motivation_sessions', { sessions });
+}
+
+export async function loadMotivationSessions(): Promise<Record<string, unknown>[]> {
+  return invoke('load_motivation_sessions');
+}
+
 // ── Canvas ──────────────────────────────────────────────────────────────
 
 export async function saveFileBinary(name: string, base64Content: string, directory: string): Promise<string> {

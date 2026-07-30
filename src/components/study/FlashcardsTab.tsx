@@ -107,7 +107,7 @@ function FlashcardsTab() {
     getAIProviders().then((providers) => {
       setGenProviderOpts(providers.map((p) => ({
         type: p.type, model: p.model,
-        label: p.endpoint ? `${p.type} · ${p.model} · ${p.endpoint}` : `${p.type} · ${p.model}`,
+        label: p.model,
       })));
     }).catch(() => { });
   }, []);
