@@ -61,7 +61,7 @@ export default function MotivationTab() {
 
   // Load sessions and providers on mount
   useEffect(() => {
-    loadMotivationSessions();
+    loadMotivationSessions().catch(() => {});
     getAIProviders().then((providers) => {
       const opts = providers.map((p) => ({
         type: p.type, model: p.model,

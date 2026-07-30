@@ -3,14 +3,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Sun, Moon, Palette, Cpu, Zap, Wifi, WifiOff, RefreshCw, Trash2, CheckCircle, Circle, Monitor, Image as ImageIcon, Music, Volume2 } from 'lucide-react';
 import { useStore } from '@/lib/store';
-import { addAIProvider, testAIProvider, getAIProviders, checkOllama, removeAIProvider, setDefaultAIProvider, type AIResponse } from '@/lib/tauri-commands';
+import { addAIProvider, testAIProvider, getAIProviders, checkOllama, removeAIProvider, setDefaultAIProvider, exportData, importData, saveCardQualities, type AIResponse } from '@/lib/tauri-commands';
+import { save, open } from '@tauri-apps/plugin-dialog';
 
-type SettingsPane = 'appearance' | 'interface' | 'providers';
+type SettingsPane = 'appearance' | 'interface' | 'providers' | 'data';
 
 const SIDEBAR_ITEMS: { id: SettingsPane; label: string; icon: React.ReactNode }[] = [
   { id: 'appearance', label: 'Appearance', icon: <Palette size={16} /> },
   { id: 'interface', label: 'Interface', icon: <Monitor size={16} /> },
   { id: 'providers', label: 'Providers', icon: <Cpu size={16} /> },
+  { id: 'data', label: 'Data', icon: <RefreshCw size={16} /> },
 ];
 
 const THEMES: { id: 'white' | 'black' | 'sepia' | 'gray' | 'forest'; icon: React.ReactNode; label: string; desc: string; bg: string; fg: string }[] = [
@@ -336,6 +338,65 @@ export default function SettingsTab() {
                   <span><strong>{testResult.provider}:</strong> {testResult.content}</span>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {pane === 'data' && (
+          <div style={{ maxWidth: 500, display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>Data</h2>
+
+            <div className="card" style={{ padding: 20 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+                Export All Data
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
+                Save all your data — flashcards, collections, documents, notes, canvas, exams,
+                providers, chat sessions, and study analytics — as a single <code>.anos</code> archive.
+              </div>
+              <button className="btn btn-primary" onClick={async () => {
+                try {
+                  const path = await save({
+                    filters: [{ name: 'Annotate Studio Archive', extensions: ['anos'] }],
+                    defaultPath: `backup-${new Date().toISOString().slice(0, 10)}.anos`,
+                  });
+                  if (!path) return;
+                  await exportData(path);
+                  alert('Data exported successfully.');
+                } catch (e) { alert('Export failed: ' + e); }
+              }} style={{ fontSize: 13 }}>
+                Export Data
+              </button>
+            </div>
+
+            <div className="card" style={{ padding: 20 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+                Import Data
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
+                Restore data from a <code>.anos</code> archive. This will overwrite all current data
+                including flashcards, documents, canvas, and settings.
+              </div>
+              <button className="btn" onClick={async () => {
+                try {
+                  const path = await open({
+                    filters: [{ name: 'Annotate Studio Archive', extensions: ['anos'] }],
+                    multiple: false,
+                  });
+                  if (!path) return;
+                  if (!confirm('Importing will overwrite all existing data. Are you sure?')) return;
+                  const cq = await importData(path as string);
+                  if (cq) await saveCardQualities(cq);
+                  alert('Data imported successfully. Reload the app to see changes.');
+                } catch (e) { alert('Import failed: ' + e); }
+              }} style={{
+                fontSize: 13,
+                background: 'var(--warning)', color: 'var(--primary-text)', border: 'none',
+                borderRadius: 'var(--radius-md)', cursor: 'pointer', fontWeight: 600,
+                padding: '8px 16px',
+              }}>
+                Import Data
+              </button>
             </div>
           </div>
         )}

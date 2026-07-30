@@ -358,3 +358,25 @@ export async function saveCanvasState(json: string): Promise<void> {
 export async function loadCanvasState(): Promise<string> {
   return invoke('load_canvas_state');
 }
+
+// ── Import / Export ────────────────────────────────────────────────
+
+export async function generateFlashcardsChunked(sourceFile: string, collectionId?: string): Promise<Flashcard[]> {
+  return invoke('generate_flashcards_chunked', { sourceFile, collectionId });
+}
+
+export async function exportData(outputPath: string): Promise<string> {
+  return invoke('export_data', { outputPath });
+}
+
+export async function saveCardQualities(data: string): Promise<void> {
+  return invoke('save_card_qualities', { data });
+}
+
+export async function loadCardQualities(): Promise<string> {
+  return invoke('load_card_qualities');
+}
+
+export async function importData(archivePath: string): Promise<string> {
+  return invoke('import_data', { archivePath });
+}

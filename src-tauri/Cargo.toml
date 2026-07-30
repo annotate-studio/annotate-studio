@@ -28,6 +28,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 anyhow = "1"
 base64 = "0.22"
+zip = "2"
 
 [profile.release]
 panic = "abort"

@@ -1,8 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use scholar_os_lib::ai_router::{AIRequest, AIResponse, AIRouter, AIProvider, ChatMessage, TaskType};
 use scholar_os_lib::filesystem::{FileSystem, StudyFile};
@@ -25,6 +26,7 @@ struct AppState {
     canvas_state_path: Mutex<String>,
     chat_sessions_path: Mutex<String>,
     motivation_sessions_path: Mutex<String>,
+    card_qualities_path: Mutex<String>,
 }
 
 // ── Utilities ────────────────────────────────────────────────────────
@@ -332,6 +334,158 @@ Rules:
         engine.add_card(card.clone());
     }
     Ok(cards)
+}
+
+/// Chunk text into reasonably-sized pieces for AI processing (by paragraphs).
+fn chunk_text(text: &str, max_chunk_size: usize) -> Vec<String> {
+    let paragraphs: Vec<&str> = text.split("\n\n").collect();
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+
+    for para in paragraphs {
+        let para = para.trim();
+        if para.is_empty() { continue; }
+
+        if current.len() + para.len() + 2 > max_chunk_size && !current.is_empty() {
+            chunks.push(current);
+            current = String::new();
+        }
+
+        if !current.is_empty() {
+            current.push_str("\n\n");
+        }
+        current.push_str(para);
+    }
+
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+
+    if chunks.is_empty() {
+        chunks.push(text.to_string());
+    }
+
+    chunks
+}
+
+/// Generate flashcards for a single content chunk.
+async fn generate_flashcards_for_chunk(
+    router: &AIRouter,
+    chunk: &str,
+    source_file: &str,
+    collection_id: &Option<String>,
+) -> Result<Vec<Flashcard>, String> {
+    let system_prompt = "You are a flashcard generator. Create Q&A flashcards from the content provided.
+
+Return a JSON array of objects. Each object must have these exact keys:
+- \"front\": a question or term
+- \"back\": the answer or explanation
+
+Rules:
+- Return a JSON array.
+- Front should be a clear question, back is the answer.
+- No markdown, no backticks, no extra text outside the JSON array.";
+
+    let messages = vec![
+        ChatMessage { role: "system".into(), content: system_prompt.into() },
+        ChatMessage {
+            role: "user".into(),
+            content: format!("Create flashcards from this content (from {}):\n\n{}", source_file, chunk),
+        },
+    ];
+
+    let response = router.route(&AIRequest {
+        messages,
+        context: Some(source_file.to_string()),
+        task_type: TaskType::GenerateFlashcard,
+    }).await?;
+
+    let parsed_list = parse_flashcards_json(&response.content).map_err(|e| {
+        format!("Failed to parse flashcards from AI ({}). Raw: {}", e, &response.content[..response.content.len().min(300)])
+    })?;
+
+    let mut cards = Vec::new();
+    for parsed in &parsed_list {
+        let front = parsed["front"].as_str().or_else(|| parsed["question"].as_str()).unwrap_or("Untitled question").to_string();
+        let back = parsed["back"].as_str().or_else(|| parsed["answer"].as_str()).unwrap_or("No answer provided").to_string();
+        let mut card = Flashcard::new(front, back, Some(source_file.to_string()), None);
+        card.collection_id = collection_id.clone();
+        cards.push(card);
+    }
+    Ok(cards)
+}
+
+#[tauri::command]
+async fn generate_flashcards_chunked(
+    app: AppHandle,
+    source_file: String,
+    collection_id: Option<String>,
+) -> Result<Vec<Flashcard>, String> {
+    let workspace = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("annotate-studio");
+
+    // Read the file (binary-safe) and convert to text lossily
+    let read_file_lossy = |path: &std::path::Path| -> Result<String, String> {
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        Ok(String::from_utf8_lossy(&bytes).to_string())
+    };
+
+    fn resolve_path(workspace: &std::path::Path, source: &str) -> std::path::PathBuf {
+        if std::path::Path::new(source).is_absolute() {
+            std::path::PathBuf::from(source)
+        } else {
+            let p = workspace.join(source);
+            if p.exists() { return p; }
+            for dir in &["documents", "notes"] {
+                let p = workspace.join(dir).join(source);
+                if p.exists() { return p; }
+            }
+            p // fallback — will fail later
+        }
+    }
+
+    let resolved = resolve_path(&workspace, &source_file);
+    let content = read_file_lossy(&resolved)
+        .map_err(|e| format!("Failed to read '{}': {}", source_file, e))?;
+
+    const MAX_CHUNK_SIZE: usize = 12_000;
+    let chunks = chunk_text(&content, MAX_CHUNK_SIZE);
+    let total = chunks.len();
+
+    // Load AI router from disk
+    let providers_path = workspace.join("providers.json");
+    let mut router = AIRouter::new();
+    router.load_from_disk(&providers_path);
+
+    let mut all_cards = Vec::new();
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        let preview: String = chunk.chars().take(60).collect();
+        app.emit("generation-progress", serde_json::json!({
+            "current": i + 1,
+            "total": total,
+            "preview": preview,
+        })).map_err(|e| e.to_string())?;
+
+        match generate_flashcards_for_chunk(&router, chunk, &source_file, &collection_id).await {
+            Ok(cards) => all_cards.extend(cards),
+            Err(_) => { /* skip chunk on failure */ }
+        }
+    }
+
+    if all_cards.is_empty() {
+        return Err("No flashcards could be generated from this document.".to_string());
+    }
+
+    // Save cards to disk
+    let flashcards_path = workspace.join("flashcards.json");
+    let mut engine = SpacedRepetitionEngine::new()
+        .with_persistence(flashcards_path);
+    for card in &all_cards {
+        engine.add_card(card.clone());
+    }
+    Ok(all_cards)
 }
 
 // ── Spaced Repetition Commands ──────────────────────────────────────
@@ -714,6 +868,141 @@ fn load_motivation_sessions(state: State<AppState>) -> Result<Vec<serde_json::Va
     Ok(load_json(&path))
 }
 
+// ── Card Qualities ──────────────────────────────────────────────────
+
+#[tauri::command]
+fn save_card_qualities(state: State<AppState>, data: String) -> Result<(), String> {
+    let path = state.card_qualities_path.lock().map_err(|e| e.to_string())?;
+    std::fs::write(&*path, &data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_card_qualities(state: State<AppState>) -> Result<String, String> {
+    let path = state.card_qualities_path.lock().map_err(|e| e.to_string())?;
+    if !std::path::Path::new(&*path).exists() {
+        return Ok("{}".to_string());
+    }
+    std::fs::read_to_string(&*path).map_err(|e| e.to_string())
+}
+
+// ── Import / Export ─────────────────────────────────────────────────
+
+#[tauri::command]
+fn export_data(output_path: String) -> Result<String, String> {
+    let workspace = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("annotate-studio");
+
+    let file = std::fs::File::create(&output_path).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipWriter::new(file);
+
+    use zip::write::FileOptions;
+    let options: FileOptions<'_, ()> = FileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    // Helper to add a file to the zip
+    let mut add_file = |zip_path: &str, disk_path: &std::path::Path| -> Result<(), String> {
+        if !disk_path.exists() { return Ok(()); }
+        let data = std::fs::read(disk_path).map_err(|e| e.to_string())?;
+        zip.start_file(zip_path, options).map_err(|e| e.to_string())?;
+        zip.write_all(&data).map_err(|e| e.to_string())?;
+        Ok(())
+    };
+
+    use std::io::Write;
+
+    // All data files
+    add_file("flashcards.json", &workspace.join("flashcards.json"))?;
+    add_file("collections.json", &workspace.join("collections.json"))?;
+    add_file("exams_data.json", &workspace.join("exams_data.json"))?;
+    add_file("providers.json", &workspace.join("providers.json"))?;
+    add_file("chat_sessions.json", &workspace.join("chat_sessions.json"))?;
+    add_file("motivation_sessions.json", &workspace.join("motivation_sessions.json"))?;
+    add_file("canvas/state.json", &workspace.join("canvas").join("state.json"))?;
+
+    // Analytics
+    add_file("analytics/activities.json", &workspace.join("analytics").join("activities.json"))?;
+    add_file("analytics/exams.json", &workspace.join("analytics").join("exams.json"))?;
+
+    // Vector DB
+    let db_path = workspace.join("index").join("documents.db");
+    if db_path.exists() {
+        add_file("index/documents.db", &db_path)?;
+    }
+
+    // User documents and notes
+    let doc_dir = workspace.join("documents");
+    if doc_dir.exists() {
+        for entry in std::fs::read_dir(&doc_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_file() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                add_file(&format!("documents/{}", name), &path)?;
+            }
+        }
+    }
+
+    let notes_dir = workspace.join("notes");
+    if notes_dir.exists() {
+        for entry in std::fs::read_dir(&notes_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_file() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                add_file(&format!("notes/{}", name), &path)?;
+            }
+        }
+    }
+
+    // Card qualities
+    add_file("card_qualities.json", &workspace.join("card_qualities.json"))?;
+
+    zip.finish().map_err(|e| e.to_string())?;
+    Ok("ok".to_string())
+}
+
+#[tauri::command]
+fn import_data(archive_path: String) -> Result<String, String> {
+    let workspace = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("annotate-studio");
+
+    let file = std::fs::File::open(&archive_path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+
+    let mut card_qualities = String::new();
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        let name = entry.name().to_string();
+
+        // Extract card_qualities separately
+        if name == "card_qualities.json" {
+            use std::io::Read;
+            entry.read_to_string(&mut card_qualities).map_err(|e| e.to_string())?;
+            continue;
+        }
+
+        let out_path = workspace.join(&name);
+
+        // Create parent directories
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+
+        // Skip directories
+        if entry.is_dir() { continue; }
+
+        use std::io::Read;
+        let mut data = Vec::new();
+        entry.read_to_end(&mut data).map_err(|e| e.to_string())?;
+        std::fs::write(&out_path, &data).map_err(|e| e.to_string())?;
+    }
+
+    Ok(card_qualities)
+}
+
 // ── App Entry ───────────────────────────────────────────────────────
 
 fn main() {
@@ -742,7 +1031,14 @@ fn main() {
     // Collections persistence
     let collections_json = workspace.join("collections.json");
     if !collections_json.exists() {
-        std::fs::write(&collections_json, "[]").ok();
+        let initial = serde_json::json!([{
+            "id": "general",
+            "name": "General",
+            "description": "Default collection for flashcards",
+            "created_at": Utc::now().to_rfc3339(),
+            "review_period_days": 1.0,
+        }]);
+        std::fs::write(&collections_json, initial.to_string()).ok();
     }
 
     // Canvas state persistence
@@ -771,6 +1067,9 @@ fn main() {
         std::fs::write(&motivation_sessions_json, "[]").ok();
     }
 
+    // Card qualities persistence
+    let card_qualities_json = workspace.join("card_qualities.json");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
@@ -789,6 +1088,7 @@ fn main() {
             canvas_state_path: Mutex::new(canvas_state_path.to_string_lossy().to_string()),
             chat_sessions_path: Mutex::new(chat_sessions_json.to_string_lossy().to_string()),
             motivation_sessions_path: Mutex::new(motivation_sessions_json.to_string_lossy().to_string()),
+            card_qualities_path: Mutex::new(card_qualities_json.to_string_lossy().to_string()),
         })
         .invoke_handler(tauri::generate_handler![
             // File system
@@ -804,6 +1104,7 @@ fn main() {
             ai_chat,
             ai_explain,
             generate_flashcard,
+            generate_flashcards_chunked,
             add_ai_provider,
             remove_ai_provider,
             set_default_ai_provider,
@@ -852,6 +1153,12 @@ fn main() {
             // Motivation sessions
             save_motivation_sessions,
             load_motivation_sessions,
+            // Card qualities
+            save_card_qualities,
+            load_card_qualities,
+            // Import / Export
+            export_data,
+            import_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");
