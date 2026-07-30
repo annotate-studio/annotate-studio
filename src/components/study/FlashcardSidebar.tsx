@@ -22,7 +22,8 @@ export default function FlashcardSidebar() {
   const [dialogPeriod, setDialogPeriod] = useState<{ id: string; days: number } | null>(null);
   const [addName, setAddName] = useState('');
   const [renameName, setRenameName] = useState('');
-  const [periodDays, setPeriodDays] = useState(1);
+  const [periodValue, setPeriodValue] = useState(1);
+  const [periodUnit, setPeriodUnit] = useState<'days' | 'hours'>('days');
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const addRef = useRef<HTMLInputElement>(null);
   const renameRef = useRef<HTMLInputElement>(null);
@@ -62,8 +63,15 @@ export default function FlashcardSidebar() {
   };
 
   const openPeriod = (col: { id: string; reviewPeriodDays: number }) => {
-    setPeriodDays(col.reviewPeriodDays);
-    setDialogPeriod({ id: col.id, days: col.reviewPeriodDays });
+    const days = col.reviewPeriodDays;
+    if (days < 1) {
+      setPeriodValue(Math.round(days * 24));
+      setPeriodUnit('hours');
+    } else {
+      setPeriodValue(days);
+      setPeriodUnit('days');
+    }
+    setDialogPeriod({ id: col.id, days });
   };
 
   const menuEdit = () => {
@@ -101,7 +109,7 @@ export default function FlashcardSidebar() {
 
   const handlePeriodSave = () => {
     if (!dialogPeriod) return;
-    const days = Math.max(1, Math.floor(periodDays));
+    const days = periodUnit === 'hours' ? Math.max(1, periodValue) / 24 : Math.max(1, periodValue);
     setCollectionReviewPeriod(dialogPeriod.id, days);
     setDialogPeriod(null);
   };
@@ -179,7 +187,7 @@ export default function FlashcardSidebar() {
                   title="Change review period"
                 >
                   <Clock size={10} />
-                  {col.reviewPeriodDays}d
+                  {col.reviewPeriodDays < 1 ? `${Math.round(col.reviewPeriodDays * 24)}h` : `${col.reviewPeriodDays}d`}
                 </button>
               )}
 
@@ -335,22 +343,35 @@ export default function FlashcardSidebar() {
       </Dialog>
 
       {/* Review period */}
-      <Dialog open={!!dialogPeriod} onClose={() => setDialogPeriod(null)} title="Review Period" width={320}>
+      <Dialog open={!!dialogPeriod} onClose={() => setDialogPeriod(null)} title="Review Period" width={340}>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.5 }}>
           How often do you want to review this collection?<br />
-          Cards will be scheduled this many days apart after a restore.
+          Cards will be scheduled this many days/hours apart after a restore.
         </p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
           <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500, whiteSpace: 'nowrap' }}>Every</span>
           <input
-            type="number" min={1} max={365}
-            value={periodDays}
-            onChange={e => setPeriodDays(Math.max(1, parseInt(e.target.value) || 1))}
+            type="number" min={1} max={periodUnit === 'days' ? 365 : 8760}
+            value={periodValue}
+            onChange={e => setPeriodValue(Math.max(1, parseInt(e.target.value) || 1))}
             onKeyDown={e => { if (e.key === 'Enter') handlePeriodSave(); }}
             className="input"
             style={{ width: 80, textAlign: 'center', fontSize: 14, padding: '6px 8px' }}
           />
-          <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>day{periodDays !== 1 ? 's' : ''}</span>
+          <div style={{ display: 'flex', borderRadius: 'var(--radius-sm)', overflow: 'hidden', border: '1px solid var(--border)' }}>
+            <button onClick={() => { setPeriodUnit('days'); setPeriodValue(1); }}
+              style={{
+                padding: '6px 10px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
+                background: periodUnit === 'days' ? 'var(--primary)' : 'transparent',
+                color: periodUnit === 'days' ? 'var(--primary-text)' : 'var(--text-secondary)',
+              }}>Days</button>
+            <button onClick={() => { setPeriodUnit('hours'); setPeriodValue(periodValue * 24 > 0 ? periodValue * 24 : 24); }}
+              style={{
+                padding: '6px 10px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
+                background: periodUnit === 'hours' ? 'var(--primary)' : 'transparent',
+                color: periodUnit === 'hours' ? 'var(--primary-text)' : 'var(--text-secondary)',
+              }}>Hours</button>
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
           <button className="btn btn-ghost" onClick={() => setDialogPeriod(null)} style={{ fontSize: 12, padding: '6px 14px' }}>

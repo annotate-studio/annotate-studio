@@ -752,9 +752,7 @@ export const useStore = create<AppState>((set, get) => ({
   setFlashcards: (cards) => set({ flashcards: cards }),
   flashcardStats: null,
   setFlashcardStats: (stats) => set({ flashcardStats: stats }),
-  flashcardCollections: [
-    { id: 'default', name: 'General', description: 'All unorganized flashcards', createdAt: new Date().toISOString(), reviewPeriodDays: 1 },
-  ],
+  flashcardCollections: [],
   addCollection: (name, description) => {
     set((s) => ({
       flashcardCollections: [
@@ -791,21 +789,21 @@ export const useStore = create<AppState>((set, get) => ({
   setActiveCollection: (id) => set({ activeCollectionId: id }),
   loadCollectionsFromDisk: async () => {
     try {
-      const { loadCollections } = await import('./tauri-commands');
-      const entries = await loadCollections();
+      const { loadCollections, saveCollections } = await import('./tauri-commands');
+      let entries = await loadCollections();
+      const before = entries.length;
+      entries = entries.filter((e: any) => (e.name || '').trim().toLowerCase() !== 'general');
+      if (entries.length !== before) {
+        saveCollections(entries.map((e: any) => ({
+          id: e.id, name: e.name, description: e.description, created_at: e.created_at,
+          review_period_days: e.review_period_days ?? 1,
+        }))).catch(() => {});
+      }
       if (entries.length === 0) return;
       const mapped: FlashcardCollection[] = entries.map((e: any) => ({
         id: e.id, name: e.name, description: e.description, createdAt: e.created_at,
         reviewPeriodDays: e.review_period_days ?? 1,
       }));
-      // Ensure "General" exists
-      const hasGeneral = mapped.some((c) => c.id === 'default');
-      if (!hasGeneral) {
-        mapped.unshift({
-          id: 'default', name: 'General', description: 'All unorganized flashcards',
-          createdAt: new Date().toISOString(), reviewPeriodDays: 1,
-        });
-      }
       set({ flashcardCollections: mapped });
     } catch {}
   },

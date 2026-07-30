@@ -669,10 +669,10 @@ struct CollectionEntry {
     description: String,
     created_at: String,
     #[serde(default = "default_review_period")]
-    review_period_days: i32,
+    review_period_days: f64,
 }
 
-fn default_review_period() -> i32 { 1 }
+fn default_review_period() -> f64 { 1.0 }
 
 #[tauri::command]
 fn save_collections(state: State<AppState>, collections: Vec<CollectionEntry>) -> Result<(), String> {

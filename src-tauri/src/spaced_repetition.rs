@@ -196,7 +196,8 @@ impl SpacedRepetitionEngine {
             card.ease_factor = 2.5;
             card.last_reviewed = None;
             if let Some(days) = period_days {
-                card.next_review = (now + chrono::Duration::days(days as i64)).to_rfc3339();
+                let secs = (days * 86400.0) as i64;
+                card.next_review = (now + chrono::Duration::seconds(secs)).to_rfc3339();
             } else {
                 card.next_review = now.to_rfc3339();
             }

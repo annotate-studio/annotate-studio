@@ -49,6 +49,16 @@ function FlashcardsTab() {
   const [genAutocompletePrefix, setGenAutocompletePrefix] = useState('');
   const [genAutocompleteIdx, setGenAutocompleteIdx] = useState(0);
   const genInputRef = useRef<HTMLTextAreaElement>(null);
+  const genProviderRef = useRef<HTMLDivElement>(null);
+
+  // Card quality tracking (persisted to localStorage)
+  const [cardQualities, setCardQualities] = useState<Record<string, ReviewQuality>>(() => {
+    try { return JSON.parse(localStorage.getItem('card-qualities') || '{}'); } catch { return {}; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('card-qualities', JSON.stringify(cardQualities)); } catch {}
+  }, [cardQualities]);
 
   // Filter dialog state
   const [filterOpen, setFilterOpen] = useState(false);
@@ -56,6 +66,10 @@ function FlashcardsTab() {
   const [filterNew, setFilterNew] = useState(true);
   const [filterYoung, setFilterYoung] = useState(true);
   const [filterMature, setFilterMature] = useState(true);
+  const [filterAgain, setFilterAgain] = useState(true);
+  const [filterHard, setFilterHard] = useState(true);
+  const [filterGood, setFilterGood] = useState(true);
+  const [filterEasy, setFilterEasy] = useState(true);
   const filtersActive = filterDue || filterNew || filterYoung || filterMature;
 
   // Request notification permission on mount
@@ -92,8 +106,17 @@ function FlashcardsTab() {
 
   const reviewCards = useMemo(() => {
     if (mode !== 'review') return filteredCards;
-    return filteredCards.filter(c => !reviewedIds.has(c.id));
-  }, [filteredCards, reviewedIds, mode]);
+    return filteredCards.filter(c => {
+      if (reviewedIds.has(c.id)) return false;
+      const q = cardQualities[c.id];
+      if (!q) return filterAgain || filterHard || filterGood || filterEasy;
+      if (q === 'Again' && !filterAgain) return false;
+      if (q === 'Hard' && !filterHard) return false;
+      if (q === 'Good' && !filterGood) return false;
+      if (q === 'Easy' && !filterEasy) return false;
+      return true;
+    });
+  }, [filteredCards, reviewedIds, cardQualities, filterAgain, filterHard, filterGood, filterEasy, mode]);
 
   const currentCard = reviewCards[currentIndex];
 
@@ -176,6 +199,7 @@ function FlashcardsTab() {
     if (!card) return;
     try {
       await reviewFlashcard(card.id, quality);
+      setCardQualities(prev => ({ ...prev, [card.id]: quality }));
       setFlipped(false);
       setReviewedIds(prev => new Set(prev).add(card.id));
       if (currentIndex + 1 >= reviewCards.length) {
@@ -249,7 +273,7 @@ function FlashcardsTab() {
       }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 2 }}>
-            {currentCollection?.name || 'General'}
+            {currentCollection?.name || 'All Cards'}
           </h1>
           <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
             {flashcardStats
@@ -320,9 +344,9 @@ function FlashcardsTab() {
         </div>
       )}
 
-      {/* Generate form */}
-      {showGenerate && (
-        <div className="card" style={{ padding: 16, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0, position: 'relative' }}>
+      {/* AI Generate Dialog */}
+      <Dialog open={showGenerate} onClose={() => { setShowGenerate(false); setGenError(''); setGenSourceFile(undefined); }} title="Generate Flashcards with AI" width={520}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <textarea
             ref={genInputRef}
             value={generateContent}
@@ -338,18 +362,13 @@ function FlashcardsTab() {
             }}
             placeholder="Paste study content or type @ to reference a document..."
             className="input"
-            style={{ flex: 1, minHeight: 80, resize: 'vertical' }}
+            style={{ minHeight: 120, resize: 'vertical' }}
             disabled={generating}
           />
-
-          {/* @autocomplete dropdown */}
           {genAutocompleteOpen && filteredDocNames.length > 0 && (
             <div style={{
-              position: 'absolute', bottom: '100%', left: 16, right: 16, zIndex: 50,
               background: 'var(--bg-card)', border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-md)', padding: 4, maxHeight: 200, overflow: 'auto',
-              boxShadow: '0 -4px 16px rgba(0,0,0,0.12)',
-              marginBottom: 4,
+              borderRadius: 'var(--radius-md)', padding: 4, maxHeight: 160, overflow: 'auto',
             }}>
               {filteredDocNames.map((name, i) => (
                 <div key={name} onClick={() => insertDocName(name)}
@@ -364,49 +383,51 @@ function FlashcardsTab() {
               ))}
             </div>
           )}
-
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <button className="btn btn-primary" onClick={handleGenerate} disabled={generating}>
                 {generating ? 'Generating...' : 'Generate'}
               </button>
-              <button className="btn btn-ghost" onClick={() => { setShowGenerate(false); setGenError(''); setGenSourceFile(undefined); setGenSelectedProvider(undefined); }}>
+              <button className="btn btn-ghost" onClick={() => { setShowGenerate(false); setGenError(''); setGenSourceFile(undefined); }}>
                 Cancel
               </button>
             </div>
-
-            {/* Provider selector */}
-            <div style={{ position: 'relative' }}>
+            <div ref={genProviderRef} style={{ position: 'relative' }}>
               <button className="btn btn-ghost" onClick={() => setGenProviderMenu(v => !v)}
                 style={{ fontSize: 11, padding: '4px 10px', gap: 3, display: 'flex', alignItems: 'center' }}>
-                <Zap size={12} /> {genSelectedProvider || 'AI Provider'}
+                <Zap size={12} /> {genSelectedProvider || (useStore.getState().selectedModel || 'Model')}
                 <ChevronDown size={11} />
               </button>
-              {genProviderMenu && (
-                <div style={{
-                  position: 'absolute', top: '100%', right: 0, zIndex: 50,
-                  background: 'var(--bg-card)', border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-md)', padding: 4, minWidth: 200,
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)', marginTop: 4,
-                }}>
-                  {genProviderOpts.length === 0 && (
-                    <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-muted)' }}>
-                      No providers. Add one in Settings.
-                    </div>
-                  )}
-                  {genProviderOpts.map((opt, i) => (
-                    <button key={i} onClick={() => { setGenSelectedProvider(opt.label); setGenProviderMenu(false); }}
-                      style={{
-                        display: 'block', width: '100%', textAlign: 'left', padding: '7px 14px', fontSize: 12,
-                        border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'inherit',
-                        background: genSelectedProvider === opt.label ? 'var(--primary-light)' : 'transparent',
-                        color: genSelectedProvider === opt.label ? 'var(--primary)' : 'var(--text-secondary)',
-                      }}>
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              )}
+              {genProviderMenu && genProviderRef.current && (() => {
+                const r = genProviderRef.current.getBoundingClientRect();
+                return (
+                  <div style={{
+                    position: 'fixed', top: r.bottom + 4,
+                    right: window.innerWidth - r.right,
+                    zIndex: 2147483647,
+                    background: 'var(--bg-card)', border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)', padding: 4, minWidth: 200,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                  }}>
+                    {genProviderOpts.length === 0 && (
+                      <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-muted)' }}>
+                        No providers. Add one in Settings.
+                      </div>
+                    )}
+                    {genProviderOpts.map((opt, i) => (
+                      <button key={i} onClick={() => { setGenSelectedProvider(opt.label); setGenProviderMenu(false); }}
+                        style={{
+                          display: 'block', width: '100%', textAlign: 'left', padding: '7px 14px', fontSize: 12,
+                          border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'inherit',
+                          background: genSelectedProvider === opt.label ? 'var(--primary-light)' : 'transparent',
+                          color: genSelectedProvider === opt.label ? 'var(--primary)' : 'var(--text-secondary)',
+                        }}>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           </div>
           {genError && (
@@ -415,7 +436,7 @@ function FlashcardsTab() {
             </div>
           )}
         </div>
-      )}
+      </Dialog>
 
       {/* Enlarged stats cards */}
       {flashcardStats && (
@@ -520,8 +541,23 @@ function FlashcardsTab() {
                     <div style={{
                       marginTop: 10, display: 'flex', gap: 12,
                       fontSize: 11, color: 'var(--text-muted)',
-                      alignItems: 'center',
+                      alignItems: 'center', flexWrap: 'wrap',
                     }}>
+                      {cardQualities[card.id] && (() => {
+                        const q = cardQualities[card.id];
+                        const badgeColors: Record<string, string> = {
+                          Again: 'var(--danger)',
+                          Hard: 'var(--warning)',
+                          Good: 'var(--success)',
+                          Easy: 'var(--primary)',
+                        };
+                        const bc = badgeColors[q] || badgeColors.Good;
+                        return (
+                          <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 'var(--radius-pill)', color: bc, background: 'color-mix(in srgb, ' + bc + ' 15%, var(--bg-card))' }}>
+                            {q}
+                          </span>
+                        );
+                      })()}
                       <span>Ease: {card.ease_factor.toFixed(1)}</span>
                       <span>Reps: {card.repetitions}</span>
                       {card.source_file && <span>From: {card.source_file}</span>}
@@ -556,13 +592,13 @@ function FlashcardsTab() {
             style={{ width: '100%', maxWidth: 560, height: 320, cursor: 'pointer' }}
           >
             <div className={`flip-card-inner ${flipped ? 'flipped' : ''}`}>
-              <div className="flip-card-front card" style={{ borderColor: 'var(--border)' }}>
+              <div className="flip-card-front" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 16 }}>QUESTION</div>
                 <div className="content-selectable" style={{ fontSize: 18, color: 'var(--text-primary)', lineHeight: 1.6, textAlign: 'center', maxWidth: 480, margin: '0 auto' }}>
                   {currentCard?.front}
                 </div>
               </div>
-              <div className="flip-card-back card" style={{ borderColor: 'var(--primary)' }}>
+              <div className="flip-card-back" style={{ background: 'var(--bg-card)', borderColor: 'var(--primary)' }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 16 }}>ANSWER</div>
                 <div className="content-selectable" style={{ fontSize: 16, color: 'var(--text-primary)', lineHeight: 1.6, textAlign: 'center', maxWidth: 480, margin: '0 auto' }}>
                   {currentCard?.back}
@@ -573,7 +609,7 @@ function FlashcardsTab() {
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
             {(['Again', 'Hard', 'Good', 'Easy'] as ReviewQuality[]).map((q, i) => {
-              const colors = ['#EF4444', '#F59E0B', '#10B981', '#3B82F6'];
+              const colors = ['var(--danger)', 'var(--warning)', 'var(--success)', 'var(--primary)'];
               return (
                 <button
                   key={q}
@@ -582,8 +618,8 @@ function FlashcardsTab() {
                   className="btn btn-ghost"
                   style={{
                     padding: '8px 22px', fontSize: 13, fontWeight: 600,
-                    border: `1px solid ${colors[i]}44`,
-                    background: !flipped ? 'transparent' : `${colors[i]}11`,
+                    border: '1px solid color-mix(in srgb, ' + colors[i] + ' 30%, transparent)',
+                    background: !flipped ? 'transparent' : 'color-mix(in srgb, ' + colors[i] + ' 10%, transparent)',
                     color: colors[i],
                     opacity: !flipped ? 0.4 : 1,
                     cursor: !flipped ? 'default' : 'pointer',
@@ -596,6 +632,14 @@ function FlashcardsTab() {
               );
             })}
           </div>
+          {currentCard && cardQualities[currentCard.id] && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 8, alignItems: 'center' }}>
+              Previous: <span style={{ fontWeight: 600, color: (() => {
+                const c: Record<string, string> = { Again: 'var(--danger)', Hard: 'var(--warning)', Good: 'var(--success)', Easy: 'var(--primary)' };
+                return c[cardQualities[currentCard.id]] || 'var(--text-muted)';
+              })() }}>{cardQualities[currentCard.id]}</span>
+            </div>
+          )}
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
             Click card to reveal answer · Rate your recall
           </div>
@@ -603,11 +647,9 @@ function FlashcardsTab() {
       )}
 
       {/* Filter dialog */}
-      <Dialog open={filterOpen} onClose={() => setFilterOpen(false)} title="Review Filter" width={320}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
-            Select which types of cards to include in review:
-          </div>
+      <Dialog open={filterOpen} onClose={() => setFilterOpen(false)} title="Review Filter" width={340}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>Card Type</div>
           {[
             { key: 'due' as const, label: 'Due', checked: filterDue, set: setFilterDue, desc: 'Cards scheduled for review today' },
             { key: 'new' as const, label: 'New', checked: filterNew, set: setFilterNew, desc: 'Cards never reviewed before' },
@@ -630,9 +672,29 @@ function FlashcardsTab() {
               </div>
             </label>
           ))}
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginTop: 8 }}>Last Review Quality</div>
+          {[
+            { key: 'again' as const, label: 'Again', checked: filterAgain, set: setFilterAgain, color: 'var(--danger)' },
+            { key: 'hard' as const, label: 'Hard', checked: filterHard, set: setFilterHard, color: 'var(--warning)' },
+            { key: 'good' as const, label: 'Good', checked: filterGood, set: setFilterGood, color: 'var(--success)' },
+            { key: 'easy' as const, label: 'Easy', checked: filterEasy, set: setFilterEasy, color: 'var(--primary)' },
+          ].map((opt) => (
+            <label key={opt.key} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
+              borderRadius: 'var(--radius-md)', cursor: 'pointer',
+              background: opt.checked ? 'var(--primary-light)' : 'transparent',
+              border: `1px solid ${opt.checked ? 'var(--primary)' : 'var(--border)'}`,
+            }}>
+              <input type="checkbox" checked={opt.checked}
+                onChange={() => opt.set(!opt.checked)}
+                style={{ accentColor: 'var(--primary)' }}
+              />
+              <div style={{ fontSize: 13, fontWeight: 500, color: opt.color }}>{opt.label}</div>
+            </label>
+          ))}
         </div>
         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-          <button className="btn btn-ghost" onClick={() => { setFilterDue(true); setFilterNew(true); setFilterYoung(true); setFilterMature(true); }}
+          <button className="btn btn-ghost" onClick={() => { setFilterDue(true); setFilterNew(true); setFilterYoung(true); setFilterMature(true); setFilterAgain(true); setFilterHard(true); setFilterGood(true); setFilterEasy(true); }}
             style={{ fontSize: 12, padding: '6px 14px' }}>
             Reset
           </button>
