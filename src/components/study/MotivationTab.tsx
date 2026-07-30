@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Heart, Sparkles, MessageCircle, RefreshCw, Send, Maximize2, Minimize2, Trash2, ChevronDown } from 'lucide-react';
-import { useStore } from '@/lib/store';
+import { Heart, Sparkles, MessageCircle, RefreshCw, Send, Maximize2, Minimize2, Trash2, ChevronDown, Plus, MessageSquare, Edit3, Zap } from 'lucide-react';
+import { useStore, ChatMessage } from '@/lib/store';
+import { getAIProviders } from '@/lib/tauri-commands';
 import MarkdownRenderer from '@/components/canvas/MarkdownRenderer';
+import Dialog from '@/components/ui/Dialog';
 
 const QUOTES = [
   'The only way to do great work is to love what you do. — Steve Jobs',
@@ -22,46 +24,62 @@ const QUOTES = [
   'Wake up with determination. Go to bed with satisfaction.',
 ];
 
-interface TherapyMessage {
-  role: 'user' | 'ai';
-  content: string;
-  timestamp: number;
-}
-
-const STORAGE_KEY = 'motivation-messages';
-
-function loadSavedMessages(): TherapyMessage[] {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-}
-
 function formatTime(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 export default function MotivationTab() {
-  const { motivationQuote, setMotivationQuote, motivationChatMaximized, setMotivationChatMaximized } = useStore();
-  const [messages, setMessages] = useState<TherapyMessage[]>(loadSavedMessages);
+  const {
+    motivationQuote, setMotivationQuote, motivationChatMaximized, setMotivationChatMaximized,
+    selectedModel, setSelectedModel,
+    motivationMessages, motivationSessions, motivationActiveSessionId,
+    createMotivationSession, switchMotivationSession, deleteMotivationSession,
+    addMotivationMessage, clearMotivationMessages, loadMotivationSessions,
+  } = useStore();
+
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [providerOptions, setProviderOptions] = useState<{ type: string; model: string; label: string }[]>([]);
+  const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [windowWidth, setWindowWidth] = useState(0);
+
+  useEffect(() => {
+    const update = () => setWindowWidth(window.innerWidth);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  const isSmall = windowWidth < 900;
 
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Save messages to sessionStorage
+  // Load sessions and providers on mount
   useEffect(() => {
-    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(messages)); } catch {}
-  }, [messages]);
+    loadMotivationSessions();
+    getAIProviders().then((providers) => {
+      const opts = providers.map((p) => ({
+        type: p.type, model: p.model,
+        label: p.endpoint ? `${p.type} (${p.model} · ${p.endpoint})` : `${p.type} · ${p.model}`,
+      }));
+      setProviderOptions(opts);
+      if (opts.length > 0 && !opts.some((o) => o.label === selectedModel)) {
+        setSelectedModel(opts[0].label);
+      }
+    }).catch(() => {});
+  }, []);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     const el = messagesRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, loading]);
+  }, [motivationMessages, loading]);
 
   // Track scroll position to show/hide FAB
   const handleScroll = useCallback(() => {
@@ -84,15 +102,14 @@ export default function MotivationTab() {
   };
 
   const clearChat = () => {
-    setMessages([]);
-    try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
+    clearMotivationMessages();
     inputRef.current?.focus();
   };
 
   const handleSend = async () => {
     if (!input.trim()) return;
-    const userMsg: TherapyMessage = { role: 'user', content: input, timestamp: Date.now() };
-    setMessages((prev) => [...prev, userMsg]);
+    const userMsg: ChatMessage = { role: 'user', content: input, timestamp: Date.now() };
+    addMotivationMessage(userMsg);
     setInput('');
     setLoading(true);
 
@@ -106,9 +123,9 @@ export default function MotivationTab() {
         'Custom',
         'study-counselor'
       );
-      setMessages((prev) => [...prev, { role: 'ai', content: res.content, timestamp: Date.now() }]);
+      addMotivationMessage({ role: 'assistant', content: res.content, timestamp: Date.now() });
     } catch {
-      setMessages((prev) => [...prev, { role: 'ai', content: 'You\'ve got this. Take a deep breath. Every step forward counts, no matter how small. I believe in you. 🌟', timestamp: Date.now() }]);
+      addMotivationMessage({ role: 'assistant', content: 'You\'ve got this. Take a deep breath. Every step forward counts, no matter how small. I believe in you. 🌟', timestamp: Date.now() });
     }
     setLoading(false);
   };
@@ -120,6 +137,20 @@ export default function MotivationTab() {
     }
   };
 
+  const openRenameDialog = () => {
+    const s = motivationSessions.find((s) => s.id === motivationActiveSessionId);
+    if (s) { setRenameValue(s.name); setRenameDialogOpen(true); }
+  };
+
+  const confirmRename = () => {
+    if (renameValue.trim()) {
+      const s = motivationSessions.find((s) => s.id === motivationActiveSessionId);
+      if (s) { s.name = renameValue.trim(); }
+      try { localStorage.setItem('motivation-sessions', JSON.stringify(motivationSessions)); } catch {}
+    }
+    setRenameDialogOpen(false);
+  };
+
   const quickPills = [
     'I feel overwhelmed',
     'I need study motivation',
@@ -128,8 +159,84 @@ export default function MotivationTab() {
     'I want to give up',
   ];
 
+  const activeSession = motivationSessions.find((s) => s.id === motivationActiveSessionId);
+
+  const sessionDialog = (
+    <Dialog open={sessionsDialogOpen} onClose={() => setSessionsDialogOpen(false)} title="Counselor Sessions" width={360}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflow: 'auto' }}>
+        <button onClick={() => { createMotivationSession(); setSessionsDialogOpen(false); }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px',
+            borderRadius: 'var(--radius-sm)', border: '1px dashed var(--border)',
+            background: 'transparent', color: 'var(--primary)', cursor: 'pointer',
+            fontSize: 13, fontFamily: 'inherit', marginBottom: 4,
+          }}>
+          <Plus size={16} /> New Session
+        </button>
+        {motivationSessions.length === 0 && (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>
+            No sessions yet. Create one to get started.
+          </div>
+        )}
+        {motivationSessions.map((s) => (
+          <div key={s.id} onClick={() => { switchMotivationSession(s.id); setSessionsDialogOpen(false); }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '10px 12px', borderRadius: 'var(--radius-sm)',
+              cursor: 'pointer', fontSize: 13,
+              background: s.id === motivationActiveSessionId ? 'var(--primary-light)' : 'transparent',
+              color: s.id === motivationActiveSessionId ? 'var(--primary)' : 'var(--text-secondary)',
+              transition: 'background 0.1s ease',
+            }}>
+            <MessageSquare size={14} style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: s.id === motivationActiveSessionId ? 600 : 400 }}>
+                {s.name}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
+                {s.messages.length} messages · {new Date(s.createdAt).toLocaleDateString()}
+              </div>
+            </div>
+            <button onClick={(e) => { e.stopPropagation(); deleteMotivationSession(s.id); }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 'var(--radius-sm)' }}>
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </Dialog>
+  );
+
+  const renameDialog = (
+    <Dialog open={renameDialogOpen} onClose={() => setRenameDialogOpen(false)} title="Rename Session" width={360}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') confirmRename(); }}
+          style={{
+            width: '100%', padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+            border: '1px solid var(--border)', outline: 'none',
+            fontSize: 14, fontFamily: 'inherit',
+            background: 'var(--bg-surface)', color: 'var(--text-primary)',
+          }} />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          <button onClick={() => setRenameDialogOpen(false)}
+            style={{
+              padding: '8px 16px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+              background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer',
+              fontSize: 13, fontFamily: 'inherit',
+            }}>Cancel</button>
+          <button onClick={confirmRename}
+            style={{
+              padding: '8px 16px', borderRadius: 'var(--radius-sm)', border: 'none',
+              background: 'var(--primary)', color: 'var(--primary-text)', cursor: 'pointer',
+              fontSize: 13, fontFamily: 'inherit',
+            }}>Save</button>
+        </div>
+      </div>
+    </Dialog>
+  );
+
   return (
-    <div style={{ height: '100%', display: 'flex', gap: 24, padding: 24 }}>
+    <div style={{ height: '100%', display: 'flex', gap: 24, padding: 24, flexDirection: isSmall ? 'column' : 'row', overflow: 'auto' }}>
       {/* Quote & encouragement — hidden when chatbot is maximized */}
       {!motivationChatMaximized && (
         <div style={{ flexGrow: 1, flexShrink: 1, flexBasis: '0%', display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -150,7 +257,7 @@ export default function MotivationTab() {
           </div>
 
           {/* Encouraging cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isSmall ? '1fr' : '1fr 1fr', gap: 16 }}>
             <div className="card" style={{ padding: 24 }}>
               <Sparkles size={20} style={{ color: 'var(--warning)', marginBottom: 12 }} />
               <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: 'var(--text-primary)' }}>You are capable</div>
@@ -187,21 +294,67 @@ export default function MotivationTab() {
       <div className="card" style={{
         flexGrow: motivationChatMaximized ? 1 : 0,
         flexShrink: 0,
-        flexBasis: motivationChatMaximized ? '0%' : '380px',
+        flexBasis: motivationChatMaximized ? '0%' : (isSmall ? '100%' : '460px'),
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        width: motivationChatMaximized ? '100%' : 380,
+        width: motivationChatMaximized || isSmall ? '100%' : 460,
+        maxWidth: isSmall ? '100%' : 460,
       }}>
         {/* Header */}
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Heart size={16} style={{ color: 'var(--danger)' }} />
-            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>AI Counselor</span>
-            {messages.length > 0 && (
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{messages.length} messages</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+            <Heart size={16} style={{ color: 'var(--danger)', flexShrink: 0 }} />
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {activeSession?.name || 'AI Counselor'}
+            </span>
+            {activeSession && (
+              <button onClick={openRenameDialog}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                <Edit3 size={14} />
+              </button>
+            )}
+            {motivationMessages.length > 0 && (
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>{motivationMessages.length} messages</span>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {messages.length > 0 && (
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
+            {/* Model selector */}
+            <div style={{ position: 'relative' }}>
+              <button className="btn btn-ghost" onClick={() => setModelMenuOpen(!modelMenuOpen)}
+                style={{ fontSize: 11, padding: '3px 10px', gap: 4 }}>
+                <Zap size={12} /> {selectedModel || 'Model'}
+                <ChevronDown size={12} />
+              </button>
+              {modelMenuOpen && (
+                <div style={{
+                  position: 'absolute', top: '100%', right: 0, zIndex: 100,
+                  background: 'var(--bg-card)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)', padding: 4, minWidth: 200,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)', marginTop: 4,
+                }}>
+                  {providerOptions.length === 0 && (
+                    <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-muted)' }}>
+                      No providers. Add one in Settings.
+                    </div>
+                  )}
+                  {providerOptions.map((opt, i) => (
+                    <button key={i} onClick={() => { setSelectedModel(opt.label); setModelMenuOpen(false); }}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left', padding: '7px 14px', fontSize: 12,
+                        border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'inherit',
+                        background: selectedModel === opt.label ? 'var(--primary-light)' : 'transparent',
+                        color: selectedModel === opt.label ? 'var(--primary)' : 'var(--text-secondary)',
+                      }}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button className="btn btn-ghost" onClick={() => setSessionsDialogOpen(true)}
+              style={{ padding: '3px 7px', fontSize: 11 }} title="Chat Sessions">
+              <MessageSquare size={13} />
+            </button>
+            {motivationMessages.length > 0 && (
               <button className="btn btn-ghost" onClick={clearChat}
                 style={{ padding: '3px 6px', color: 'var(--text-muted)' }} title="Clear conversation">
                 <Trash2 size={14} />
@@ -216,13 +369,13 @@ export default function MotivationTab() {
 
         {/* Messages */}
         <div ref={messagesRef} onScroll={handleScroll} style={{ flex: 1, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {messages.length === 0 && (
+          {motivationMessages.length === 0 && (
             <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.7 }}>
               <Heart size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
               Hi, I&apos;m your study counselor. Share what&apos;s on your mind — I&apos;m here to listen and help.
             </div>
           )}
-          {messages.map((m, i) => (
+          {motivationMessages.map((m, i) => (
             <div key={i} style={{
               alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
               maxWidth: '85%',
@@ -274,7 +427,7 @@ export default function MotivationTab() {
         )}
 
         {/* Quick action pills — hidden when maximized */}
-        {!motivationChatMaximized && messages.length === 0 && (
+        {!motivationChatMaximized && motivationMessages.length === 0 && (
           <div style={{ padding: '0 16px 8px', display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {quickPills.map((pill) => (
               <button key={pill} className="btn btn-ghost" onClick={() => { setInput(pill); inputRef.current?.focus(); }}
@@ -308,6 +461,9 @@ export default function MotivationTab() {
           </button>
         </div>
       </div>
+
+      {sessionDialog}
+      {renameDialog}
     </div>
   );
 }

@@ -172,6 +172,15 @@ interface AppState {
   setMotivationQuote: (q: string) => void;
   motivationChatMaximized: boolean;
   setMotivationChatMaximized: (maximized: boolean) => void;
+  motivationSessions: ChatSession[];
+  motivationActiveSessionId: string | null;
+  motivationMessages: ChatMessage[];
+  createMotivationSession: () => void;
+  switchMotivationSession: (id: string) => void;
+  deleteMotivationSession: (id: string) => void;
+  addMotivationMessage: (msg: ChatMessage) => void;
+  clearMotivationMessages: () => void;
+  loadMotivationSessions: () => void;
 
   // Documents
   documents: StudyFile[];
@@ -229,6 +238,11 @@ async function persistChatSessions(sessions: Record<string, unknown>[]) {
 function saveChatSessionsSnapshot(get: () => AppState) {
   const sessions = get().chatSessions;
   persistChatSessions(sessions as unknown as Record<string, unknown>[]);
+}
+
+function persistMotivationSessions(get: () => AppState) {
+  const sessions = get().motivationSessions;
+  try { localStorage.setItem('motivation-sessions', JSON.stringify(sessions)); } catch {}
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -625,6 +639,92 @@ export const useStore = create<AppState>((set, get) => ({
   setMotivationQuote: (q) => set({ motivationQuote: q }),
   motivationChatMaximized: false,
   setMotivationChatMaximized: (maximized) => set({ motivationChatMaximized: maximized }),
+  motivationSessions: [],
+  motivationActiveSessionId: null,
+  motivationMessages: [],
+  createMotivationSession: () => {
+    set((s) => {
+      const newSession: ChatSession = {
+        id: crypto.randomUUID(),
+        name: `Session ${s.motivationSessions.length + 1}`,
+        messages: [],
+        createdAt: Date.now(),
+      };
+      let updatedSessions = s.motivationSessions;
+      if (s.motivationActiveSessionId) {
+        updatedSessions = updatedSessions.map((ses) =>
+          ses.id === s.motivationActiveSessionId ? { ...ses, messages: s.motivationMessages } : ses
+        );
+      }
+      return {
+        motivationSessions: [...updatedSessions, newSession],
+        motivationActiveSessionId: newSession.id,
+        motivationMessages: [],
+      };
+    });
+    persistMotivationSessions(get);
+  },
+  switchMotivationSession: (id) => {
+    set((s) => {
+      let updatedSessions = s.motivationSessions;
+      if (s.motivationActiveSessionId) {
+        updatedSessions = updatedSessions.map((ses) =>
+          ses.id === s.motivationActiveSessionId ? { ...ses, messages: s.motivationMessages } : ses
+        );
+      }
+      const target = updatedSessions.find((ses) => ses.id === id);
+      return {
+        motivationSessions: updatedSessions,
+        motivationActiveSessionId: id,
+        motivationMessages: target?.messages || [],
+      };
+    });
+    persistMotivationSessions(get);
+  },
+  deleteMotivationSession: (id) => {
+    set((s) => {
+      const updatedSessions = s.motivationSessions.filter((ses) => ses.id !== id);
+      const isActive = s.motivationActiveSessionId === id;
+      if (isActive) {
+        const next = updatedSessions.length > 0 ? updatedSessions[0] : null;
+        return {
+          motivationSessions: updatedSessions,
+          motivationActiveSessionId: next?.id || null,
+          motivationMessages: next?.messages || [],
+        };
+      }
+      return { motivationSessions: updatedSessions };
+    });
+    persistMotivationSessions(get);
+  },
+  addMotivationMessage: (msg) => {
+    set((s) => {
+      const updatedSessions = s.motivationActiveSessionId
+        ? s.motivationSessions.map((ses) =>
+            ses.id === s.motivationActiveSessionId
+              ? { ...ses, messages: [...ses.messages, msg] }
+              : ses
+          )
+        : s.motivationSessions;
+      return { motivationMessages: [...s.motivationMessages, msg], motivationSessions: updatedSessions };
+    });
+    persistMotivationSessions(get);
+  },
+  clearMotivationMessages: () => set({ motivationMessages: [] }),
+  loadMotivationSessions: () => {
+    try {
+      const raw = localStorage.getItem('motivation-sessions');
+      if (raw) {
+        const sessions = JSON.parse(raw) as ChatSession[];
+        const first = sessions[0];
+        set({
+          motivationSessions: sessions,
+          motivationActiveSessionId: first?.id || null,
+          motivationMessages: first?.messages || [],
+        });
+      }
+    } catch {}
+  },
 
   // Documents
   documents: [],
