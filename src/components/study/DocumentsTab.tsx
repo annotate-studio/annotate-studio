@@ -46,23 +46,6 @@ export default function DocumentsTab() {
       .finally(() => setLoading(false));
   }, [setDocuments]);
 
-  const fileRefs = useMemo(() => {
-    const refs: Record<string, number> = {};
-    resources.forEach((r) => {
-      if (r.filePath) {
-        refs[r.filePath] = (refs[r.filePath] || 0) + 1;
-      }
-      if (r.content && r.type === 'note') {
-        documents.forEach((d) => {
-          if (r.content?.includes(d.name)) {
-            refs[d.path] = (refs[d.path] || 0) + 1;
-          }
-        });
-      }
-    });
-    return refs;
-  }, [resources, documents]);
-
   const filtered = useMemo(() => {
     if (!search.trim()) return documents;
     const q = search.toLowerCase();
@@ -129,7 +112,6 @@ export default function DocumentsTab() {
             {filtered.map((doc) => {
               const meta = typeMeta[doc.file_type] || typeMeta.Unknown;
               const isHovered = hoveredId === doc.id;
-              const refCount = fileRefs[doc.path] || 0;
 
               return (
                 <div
@@ -210,11 +192,6 @@ export default function DocumentsTab() {
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Calendar size={11} />
                       {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : 'Unknown'}
-                      {refCount > 0 && (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: 'var(--primary)', marginLeft: 2 }}>
-                          · <Eye size={11} /> {refCount}
-                        </span>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -225,10 +202,9 @@ export default function DocumentsTab() {
       </div>
 
       {/* Preview Dialog */}
-      <Dialog open={!!previewDoc} onClose={() => setPreviewDoc(null)} title={previewDoc?.name || ''} width={500}>
+      <Dialog open={!!previewDoc} onClose={() => setPreviewDoc(null)} title="Document" width={500}>
         {previewDoc && (() => {
           const meta = typeMeta[previewDoc.file_type] || typeMeta.Unknown;
-          const refCount = fileRefs[previewDoc.path] || 0;
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <div style={{
@@ -254,15 +230,6 @@ export default function DocumentsTab() {
                   }}>
                     {meta.label}
                   </span>
-                  {refCount > 0 && (
-                    <span style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 4,
-                      fontSize: 11, fontWeight: 600, color: 'var(--primary)',
-                      background: 'var(--primary-light)', padding: '3px 8px', borderRadius: 'var(--radius-sm)',
-                    }}>
-                      <Eye size={11} /> {refCount} reference{refCount !== 1 ? 's' : ''}
-                    </span>
-                  )}
                 </div>
               </div>
 
@@ -285,11 +252,9 @@ export default function DocumentsTab() {
                     padding: '8px 18px', borderRadius: 'var(--radius-sm)',
                     border: '1px solid transparent', cursor: 'pointer',
                     fontSize: 13, fontWeight: 600,
-                    color: '#DC2626', background: '#FEF2F2',
+                    color: 'var(--danger)', background: 'var(--bg-surface)',
                     display: 'flex', alignItems: 'center', gap: 6,
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = '#FEE2E2'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = '#FEF2F2'; }}
                 >
                   <Trash2 size={14} /> Delete
                 </button>
