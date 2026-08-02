@@ -22,6 +22,56 @@ const STAT_META = [
   { key: 'mature' as const, label: 'Mature', color: '#8B5CF6', icon: BarChart3 },
 ];
 
+// ── PDF extraction helpers (shared pattern with ChatbotZone) ──────
+let _pdfjsLoaded = false;
+let _pdfjsLoading: Promise<void> | null = null;
+
+async function loadPdfjs(): Promise<void> {
+  if (_pdfjsLoaded) return;
+  if (_pdfjsLoading) return _pdfjsLoading;
+  _pdfjsLoading = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = '/pdf.min.js';
+    s.onload = () => {
+      const lib = (window as any).pdfjsLib;
+      if (!lib) { reject(new Error('pdfjsLib not found')); return; }
+      lib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+      _pdfjsLoaded = true;
+      resolve();
+    };
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+  return _pdfjsLoading;
+}
+
+async function extractPdfText(base64: string, maxChars = 3000): Promise<string> {
+  await loadPdfjs();
+  const pdfjsLib = (window as any).pdfjsLib;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const pdf = await pdfjsLib.getDocument({ data: bytes.buffer }).promise;
+  const totalPages = pdf.numPages;
+  const parts: string[] = [];
+  let lastPageRead = 0;
+  for (let i = 1; i <= totalPages; i++) {
+    const page = await pdf.getPage(i);
+    const tc = await page.getTextContent();
+    const text = tc.items.map((item: any) => item.str).join(' ');
+    parts.push(text);
+    lastPageRead = i;
+    if (parts.join('\n').length >= maxChars) break;
+  }
+  pdf.destroy();
+  const excerpt = parts.join('\n').slice(0, maxChars);
+  const isTruncated = lastPageRead < totalPages;
+  let note = `[Extracted from ${totalPages} page${totalPages > 1 ? 's' : ''}`;
+  if (isTruncated) note += ` (showing first ~${maxChars} chars from ${lastPageRead} page${lastPageRead > 1 ? 's' : ''})`;
+  note += ']';
+  return `${excerpt}\n\n${note}`;
+}
+
 function FlashcardsTab() {
   const {
     flashcards, setFlashcards, flashcardStats, setFlashcardStats,
@@ -265,7 +315,14 @@ function FlashcardsTab() {
     try {
       let cards: Flashcard[];
       if (genSourceFile) {
-        cards = await generateFlashcardsChunked(genSourceFile, activeCollectionId ?? undefined);
+        const isPdf = genSourceFile.toLowerCase().endsWith('.pdf');
+        if (isPdf) {
+          const b64 = await readFileBase64(genSourceFile);
+          const text = await extractPdfText(b64, 24000);
+          cards = await generateFlashcard(text, genSourceFile, activeCollectionId ?? undefined);
+        } else {
+          cards = await generateFlashcardsChunked(genSourceFile, activeCollectionId ?? undefined);
+        }
       } else {
         cards = await generateFlashcard(generateContent.trim(), undefined, activeCollectionId ?? undefined);
       }

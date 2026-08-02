@@ -36,7 +36,7 @@ export default function SettingsTab() {
   const [pane, setPane] = useState<SettingsPane>('appearance');
 
   const [ollamaAvailable, setOllamaAvailable] = useState<boolean | null>(null);
-  const [providers, setProviders] = useState<{ type: string; model: string; configured: boolean; active: boolean; endpoint?: string }[]>([]);
+  const [providers, setProviders] = useState<{ type: string; model_name: string; model: string; configured: boolean; active: boolean; endpoint?: string }[]>([]);
   const [providerType, setProviderType] = useState('openai');
   const [apiKey, setApiKey] = useState('');
   const [endpoint, setEndpoint] = useState('http://localhost:11434');
@@ -256,7 +256,7 @@ export default function SettingsTab() {
                         <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>{p.model}{p.endpoint ? ` · ${p.endpoint}` : ''}</div>
                       </div>
                       <button
-                        onClick={async (e) => { e.stopPropagation(); try { await removeAIProvider(p.type); refreshProviders(); } catch {} }}
+                        onClick={async (e) => { e.stopPropagation(); try { await removeAIProvider(p.type, p.model_name ?? p.model); refreshProviders(); } catch {} }}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 4, flexShrink: 0 }}
                         title={`Remove ${p.type}`}
                       >

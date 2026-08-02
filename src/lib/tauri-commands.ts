@@ -257,11 +257,14 @@ export async function deleteWorkspaceFile(relativePath: string): Promise<void> {
   return invoke('delete_workspace_file', { relativePath });
 }
 
-export async function getAIProviders(): Promise<{ type: string; model: string; configured: boolean; active: boolean; endpoint?: string }[]> {
+export async function getAIProviders(): Promise<{ type: string; model_name: string; model: string; configured: boolean; active: boolean; endpoint?: string }[]> {
   return invoke('get_ai_providers');
 }
 
-export async function removeAIProvider(providerType: string): Promise<void> {
+export async function removeAIProvider(providerType: string, model?: string): Promise<void> {
+  if (model) {
+    return invoke('remove_ai_provider_model', { providerType, model });
+  }
   return invoke('remove_ai_provider', { providerType });
 }
 

@@ -18,6 +18,22 @@ pub enum AIProvider {
 }
 
 impl AIProvider {
+    pub fn model_name(&self) -> &str {
+        match self {
+            AIProvider::OpenAI { model, .. } => model,
+            AIProvider::Anthropic { model, .. } => model,
+            AIProvider::Ollama { model, .. } => model,
+            AIProvider::DeepSeek { model, .. } => model,
+            AIProvider::OpenRouter { model, .. } => model,
+            AIProvider::Groq { model, .. } => model,
+            AIProvider::GoogleGemini { model, .. } => model,
+            AIProvider::Mistral { model, .. } => model,
+            AIProvider::Together { model, .. } => model,
+            AIProvider::XAI { model, .. } => model,
+            AIProvider::Perplexity { model, .. } => model,
+            AIProvider::Cohere { model, .. } => model,
+        }
+    }
     pub fn type_name(&self) -> &'static str {
         match self {
             AIProvider::OpenAI { .. } => "openai",
@@ -84,7 +100,9 @@ impl AIRouter {
 
     pub fn add_provider(&mut self, provider: AIProvider) {
         let t = provider.type_name();
-        if let Some(pos) = self.providers.iter().position(|p| p.type_name() == t) {
+        let model = provider.model_name();
+        // Match on (type, model) pair so one provider type can have multiple models
+        if let Some(pos) = self.providers.iter().position(|p| p.type_name() == t && p.model_name() == model) {
             self.providers[pos] = provider;
         } else {
             self.providers.push(provider);
@@ -95,35 +113,26 @@ impl AIRouter {
         self.providers.retain(|p| p.type_name() != provider_type);
     }
 
-    pub fn set_default_provider(&mut self, provider_type: &str) {
-        if let Some(pos) = self.providers.iter().position(|p| p.type_name() == provider_type) {
+    pub fn remove_provider_model(&mut self, provider_type: &str, model: &str) {
+        self.providers.retain(|p| !(p.type_name() == provider_type && p.model_name() == model));
+    }
+
+    pub fn set_default_provider(&mut self, provider_type: &str, model: &str) {
+        if let Some(pos) = self.providers.iter().position(|p| p.type_name() == provider_type && p.model_name() == model) {
             let p = self.providers.remove(pos);
             self.providers.insert(0, p);
         }
     }
 
-    pub fn providers(&self) -> &[AIProvider] {
-        &self.providers
-    }
-
-    pub fn save_to_disk(&self, path: &std::path::Path) -> Result<(), String> {
-        let json = serde_json::to_string_pretty(&self.providers).map_err(|e| e.to_string())?;
-        std::fs::write(path, json).map_err(|e| e.to_string())
-    }
-
-    pub fn load_from_disk(&mut self, path: &std::path::Path) {
-        if let Ok(data) = std::fs::read_to_string(path) {
-            if let Ok(providers) = serde_json::from_str::<Vec<AIProvider>>(&data) {
-                self.providers = providers;
-            }
-        }
-    }
-
-    pub async fn route(&self, request: &AIRequest) -> Result<AIResponse, String> {
-        if self.providers.is_empty() {
-            return Err("No AI providers configured. Add one in Settings.".into());
-        }
-        let provider = &self.providers[0];
+    /// Route using the default (first) provider, or a specific model if provided.
+    pub async fn route_model(&self, request: &AIRequest, model_name: Option<&str>) -> Result<AIResponse, String> {
+        let provider = if let Some(name) = model_name {
+            self.providers.iter().find(|p| p.model_name() == name)
+                .or_else(|| self.providers.first())
+        } else {
+            self.providers.first()
+        };
+        let provider = provider.ok_or_else(|| "No AI providers configured. Add one in Settings.".to_string())?;
         match provider {
             AIProvider::OpenAI { api_key, model } => {
                 self.call_openai_compat("https://api.openai.com/v1/chat/completions", api_key, model, request).await
@@ -162,6 +171,28 @@ impl AIRouter {
             }
             AIProvider::Cohere { api_key, model } => {
                 self.call_openai_compat("https://api.cohere.com/v2/chat/completions", api_key, model, request).await
+            }
+        }
+    }
+
+    /// Route using providers[0] (backward compat).
+    pub async fn route(&self, request: &AIRequest) -> Result<AIResponse, String> {
+        self.route_model(request, None).await
+    }
+
+    pub fn providers(&self) -> &[AIProvider] {
+        &self.providers
+    }
+
+    pub fn save_to_disk(&self, path: &std::path::Path) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(&self.providers).map_err(|e| e.to_string())?;
+        std::fs::write(path, json).map_err(|e| e.to_string())
+    }
+
+    pub fn load_from_disk(&mut self, path: &std::path::Path) {
+        if let Ok(data) = std::fs::read_to_string(path) {
+            if let Ok(providers) = serde_json::from_str::<Vec<AIProvider>>(&data) {
+                self.providers = providers;
             }
         }
     }

@@ -147,10 +147,11 @@ async fn ai_chat(
     messages: Vec<ChatMessage>,
     task_type: TaskType,
     context: Option<String>,
+    model: Option<String>,
 ) -> Result<AIResponse, String> {
     let router = state.ai_router.lock().map_err(|e| e.to_string())?.clone();
     router
-        .route(&AIRequest { messages, context, task_type })
+        .route_model(&AIRequest { messages, context, task_type }, model.as_deref())
         .await
 }
 
@@ -289,6 +290,7 @@ async fn generate_flashcard(
     content: String,
     source_file: Option<String>,
     collection_id: Option<String>,
+    model: Option<String>,
 ) -> Result<Vec<Flashcard>, String> {
     let mut messages = vec![ChatMessage {
         role: "system".into(),
@@ -314,7 +316,7 @@ Rules:
             source_file.as_ref().map(|f| format!(" (from {})", f)).unwrap_or_default(), content),
     });
     let router = state.ai_router.lock().map_err(|e| e.to_string())?.clone();
-    let response = router.route(&AIRequest { messages, context: source_file.clone(), task_type: TaskType::GenerateFlashcard }).await?;
+    let response = router.route_model(&AIRequest { messages, context: source_file.clone(), task_type: TaskType::GenerateFlashcard }, model.as_deref()).await?;
 
     let parsed_list = parse_flashcards_json(&response.content).map_err(|e| {
         format!("Failed to parse flashcards from AI response ({}). Raw: {}", e, &response.content[..response.content.len().min(300)])
@@ -374,6 +376,7 @@ async fn generate_flashcards_for_chunk(
     chunk: &str,
     source_file: &str,
     collection_id: &Option<String>,
+    model: Option<&str>,
 ) -> Result<Vec<Flashcard>, String> {
     let system_prompt = "You are a flashcard generator. Create Q&A flashcards from the content provided.
 
@@ -394,11 +397,11 @@ Rules:
         },
     ];
 
-    let response = router.route(&AIRequest {
+    let response = router.route_model(&AIRequest {
         messages,
         context: Some(source_file.to_string()),
         task_type: TaskType::GenerateFlashcard,
-    }).await?;
+    }, model).await?;
 
     let parsed_list = parse_flashcards_json(&response.content).map_err(|e| {
         format!("Failed to parse flashcards from AI ({}). Raw: {}", e, &response.content[..response.content.len().min(300)])
@@ -468,7 +471,7 @@ async fn generate_flashcards_chunked(
             "preview": preview,
         })).map_err(|e| e.to_string())?;
 
-        match generate_flashcards_for_chunk(&router, chunk, &source_file, &collection_id).await {
+        match generate_flashcards_for_chunk(&router, chunk, &source_file, &collection_id, None).await {
             Ok(cards) => all_cards.extend(cards),
             Err(_) => { /* skip chunk on failure */ }
         }
@@ -680,10 +683,28 @@ fn remove_ai_provider(state: State<AppState>, provider_type: String) -> Result<(
 }
 
 #[tauri::command]
-fn set_default_ai_provider(state: State<AppState>, provider_type: String) -> Result<(), String> {
+fn remove_ai_provider_model(state: State<AppState>, provider_type: String, model: String) -> Result<(), String> {
     let mut router = state.ai_router.lock().map_err(|e| e.to_string())?;
     let provider_path = state.providers_path.lock().map_err(|e| e.to_string())?;
-    router.set_default_provider(&provider_type);
+    router.remove_provider_model(&provider_type, &model);
+    save_providers_disk(&router, &provider_path);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_default_ai_provider(state: State<AppState>, provider_type: String, model: Option<String>) -> Result<(), String> {
+    let mut router = state.ai_router.lock().map_err(|e| e.to_string())?;
+    let provider_path = state.providers_path.lock().map_err(|e| e.to_string())?;
+    if let Some(m) = model {
+        router.set_default_provider(&provider_type, &m);
+    } else {
+        // Fallback: set first provider of this type as default
+        if let Some(pos) = router.providers().iter().position(|p| p.type_name() == provider_type) {
+            let p = router.providers()[pos].clone();
+            let m = p.model_name().to_string();
+            router.set_default_provider(&provider_type, &m);
+        }
+    }
     save_providers_disk(&router, &provider_path);
     Ok(())
 }
@@ -692,7 +713,7 @@ fn set_default_ai_provider(state: State<AppState>, provider_type: String) -> Res
 fn get_ai_providers(state: State<AppState>) -> Result<Vec<serde_json::Value>, String> {
     let router = state.ai_router.lock().map_err(|e| e.to_string())?;
     let providers: Vec<serde_json::Value> = router.providers().iter().enumerate().map(|(i, p)| {
-        let base = |model: &str| serde_json::json!({ "type": p.type_name(), "model": model, "configured": true, "active": i == 0 });
+        let base = |model: &str| serde_json::json!({ "type": p.type_name(), "model_name": p.model_name(), "model": model, "configured": true, "active": i == 0 });
         match p {
             AIProvider::OpenAI { model, .. } => base(model),
             AIProvider::Anthropic { model, .. } => base(model),
@@ -705,10 +726,10 @@ fn get_ai_providers(state: State<AppState>) -> Result<Vec<serde_json::Value>, St
             AIProvider::Perplexity { model, .. } => base(model),
             AIProvider::Cohere { model, .. } => base(model),
             AIProvider::Ollama { endpoint, model } => {
-                serde_json::json!({ "type": p.type_name(), "endpoint": endpoint, "model": model, "configured": true, "active": i == 0 })
+                serde_json::json!({ "type": p.type_name(), "model_name": p.model_name(), "endpoint": endpoint, "model": model, "configured": true, "active": i == 0 })
             }
             AIProvider::OpenRouter { endpoint, model, .. } => {
-                serde_json::json!({ "type": p.type_name(), "endpoint": endpoint, "model": model, "configured": true, "active": i == 0 })
+                serde_json::json!({ "type": p.type_name(), "model_name": p.model_name(), "endpoint": endpoint, "model": model, "configured": true, "active": i == 0 })
             }
         }
     }).collect();
@@ -716,16 +737,14 @@ fn get_ai_providers(state: State<AppState>) -> Result<Vec<serde_json::Value>, St
 }
 
 #[tauri::command]
-fn test_ai_provider(state: State<AppState>) -> Result<AIResponse, String> {
+async fn test_ai_provider(state: State<'_, AppState>) -> Result<AIResponse, String> {
     let router = state.ai_router.lock().map_err(|e| e.to_string())?.clone();
-    let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        router.route(&AIRequest {
-            messages: vec![ChatMessage { role: "user".into(), content: "Say 'Hello from Annotate Studio' and nothing else.".into() }],
-            context: None,
-            task_type: TaskType::Custom,
-        }).await
-    })
+    drop(state);
+    router.route(&AIRequest {
+        messages: vec![ChatMessage { role: "user".into(), content: "Say 'Hello from Annotate Studio' and nothing else.".into() }],
+        context: None,
+        task_type: TaskType::Custom,
+    }).await
 }
 
 #[tauri::command]
@@ -1107,6 +1126,7 @@ fn main() {
             generate_flashcards_chunked,
             add_ai_provider,
             remove_ai_provider,
+            remove_ai_provider_model,
             set_default_ai_provider,
             get_ai_providers,
             test_ai_provider,
