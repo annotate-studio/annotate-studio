@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect } from 'react';
+import IconButton from './IconButton';
 import { X } from 'lucide-react';
 
 interface DialogProps {
@@ -25,41 +26,21 @@ export default function Dialog({ open, onClose, title, children, width = 400 }: 
     <div
       onClick={onClose}
       onPointerDown={(e) => e.stopPropagation()}
-      style={{
-        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-        zIndex: 2147483647,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'var(--bg-overlay)',
-      }}
+      className='fixed inset-0 z-50 flex items-center justify-center bg-[var(--bg-overlay)]'
     >
       <div
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
-        className="card"
-        style={{
-          width, maxWidth: '90vw',
-          padding: 0, overflow: 'hidden',
-        }}
+        className='card w-full max-w-[90vw] overflow-hidden'
+        style={{ width }}
       >
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '14px 18px',
-          borderBottom: '1px solid var(--border)',
-        }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
-            {title}
-          </span>
-          <button
-            onClick={onClose}
-            className="btn btn-ghost"
-            style={{ padding: '2px 6px', borderRadius: 'var(--radius-sm)' }}
-          >
+        <div className='flex items-center justify-between px-4 py-3.5 border-b border-[var(--border)]'>
+          <span className='text-sm font-semibold text-[var(--text-primary)]'>{title}</span>
+          <IconButton onClick={onClose} variant='default' size='sm' aria-label='Close'>
             <X size={14} />
-          </button>
+          </IconButton>
         </div>
-        <div style={{ padding: '16px 18px' }}>
-          {children}
-        </div>
+        <div className='px-4 py-4'>{children}</div>
       </div>
     </div>
   );

@@ -8,63 +8,49 @@ interface ButtonProps {
   active?: boolean;
   disabled?: boolean;
   title?: string;
-  variant?: 'ghost' | 'primary' | 'danger' | 'warning';
-  size?: 'sm' | 'md';
+  variant?: 'ghost' | 'primary' | 'danger' | 'warning' | 'secondary';
+  size?: 'xs' | 'sm' | 'md' | 'lg';
   className?: string;
-  style?: React.CSSProperties;
 }
 
-const variantStyles: Record<string, React.CSSProperties> = {
-  ghost: {
-    background: 'transparent',
-    color: 'var(--text-secondary)',
-    border: '1px solid transparent',
-  },
-  primary: {
-    background: 'var(--primary)',
-    color: 'var(--primary-text)',
-    border: '1px solid transparent',
-  },
-  danger: {
-    background: 'transparent',
-    color: 'var(--danger)',
-    border: '1px solid var(--danger)',
-  },
-  warning: {
-    background: 'var(--warning-light)',
-    color: 'var(--warning)',
-    border: '1px solid var(--warning)',
-  },
+const variantStyles = {
+  ghost: 'bg-transparent text-[var(--text-secondary)] border border-transparent hover:bg-[var(--primary-light)] hover:text-[var(--primary)]',
+  primary: 'bg-[var(--primary)] text-[var(--primary-text)] border border-transparent hover:brightness-90',
+  danger: 'bg-transparent text-[var(--danger)] border border-[var(--danger)] hover:bg-[var(--danger-light)]',
+  warning: 'bg-[var(--warning-light)] text-[var(--warning)] border border-[var(--warning)] hover:bg-yellow-100',
+  secondary: 'bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-elevated)]',
 };
 
-const activeOverrides: Record<string, React.CSSProperties> = {
-  ghost: { background: 'var(--primary-light)', color: 'var(--primary)', border: '1px solid var(--primary)' },
-};
-
-const sizeStyles: Record<string, React.CSSProperties> = {
-  sm: { padding: '3px 8px', fontSize: 11 },
-  md: { padding: '6px 12px', fontSize: 12 },
+const sizeStyles = {
+  xs: 'px-2 py-1 text-xs',
+  sm: 'px-3 py-1.5 text-xs',
+  md: 'px-4 py-2 text-sm',
+  lg: 'px-6 py-2.5 text-base',
 };
 
 export default function Button({
-  onClick, children, active, disabled, title,
-  variant = 'ghost', size = 'sm', className, style,
+  onClick,
+  children,
+  active = false,
+  disabled = false,
+  title,
+  variant = 'ghost',
+  size = 'sm',
+  className = '',
 }: ButtonProps) {
-  const base: React.CSSProperties = {
-    borderRadius: 'var(--radius-sm)',
-    cursor: disabled ? 'default' : 'pointer',
-    display: 'flex', alignItems: 'center', gap: 4,
-    fontFamily: 'inherit', lineHeight: 1.5, whiteSpace: 'nowrap',
-    transition: 'background 0.1s, color 0.1s, border-color 0.1s',
-    opacity: disabled ? 0.4 : 1,
-    ...variantStyles[variant],
-    ...(active ? activeOverrides[variant] || {} : {}),
-    ...sizeStyles[size],
-    ...style,
-  };
+  const activeStyles = active
+    ? variant === 'ghost'
+      ? 'bg-[var(--primary-light)] text-[var(--primary)] border border-[var(--primary)]'
+      : ''
+    : '';
 
   return (
-    <button className={className} onClick={onClick} disabled={disabled} title={title} style={base}>
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[var(--radius-sm)] font-medium transition-all duration-150 ease-in-out cursor-pointer ${variantStyles[variant]} ${sizeStyles[size]} ${activeStyles} ${disabled ? 'opacity-40 cursor-default' : ''} ${className}`}
+    >
       {children}
     </button>
   );
