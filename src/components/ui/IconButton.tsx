@@ -5,15 +5,17 @@ import React from 'react';
 interface IconButtonProps {
   onClick?: (e: React.MouseEvent) => void;
   children: React.ReactNode;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'xs' | 'sm' | 'md' | 'lg';
   variant?: 'default' | 'danger' | 'success' | 'warning';
   title?: string;
   disabled?: boolean;
   className?: string;
+  style?: React.CSSProperties;
   'aria-label'?: string;
 }
 
 const sizeStyles = {
+  xs: 'w-7 h-7',
   sm: 'w-8 h-8',
   md: 'w-9 h-9',
   lg: 'w-10 h-10',
@@ -34,6 +36,7 @@ export default function IconButton({
   title,
   disabled = false,
   className = '',
+  style,
   'aria-label': ariaLabel,
 }: IconButtonProps) {
   return (
@@ -42,6 +45,7 @@ export default function IconButton({
       disabled={disabled}
       title={title}
       aria-label={ariaLabel}
+      style={style}
       className={`inline-flex items-center justify-center rounded-[var(--radius-xs)] transition-all duration-150 ease-in-out cursor-pointer ${sizeStyles[size]} ${variantStyles[variant]} ${disabled ? 'opacity-40 cursor-default' : ''} ${className}`}
     >
       {children}

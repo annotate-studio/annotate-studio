@@ -42,6 +42,19 @@ async function getPdfPageCount(base64: string): Promise<string> {
   return `${pages} page${pages > 1 ? 's' : ''}`;
 }
 
+/** True if the extracted text looks like real readable content, not binary garbage or an empty scrape. */
+function hasReadableText(text: string): boolean {
+  const sample = text.trim();
+  if (sample.length < 20) return false;
+  const body = sample.slice(0, 3000);
+  let printable = 0;
+  for (const ch of body) {
+    if (ch === '\uFFFD') return false;
+    if (ch === '\n' || ch === '\t' || ch === '\r' || ch >= ' ') printable++;
+  }
+  return printable / Math.max(1, body.length) > 0.95;
+}
+
 async function extractPdfText(base64: string, maxChars = 3000): Promise<string> {
   await loadPdfjs();
   const pdfjsLib = (window as any).pdfjsLib;
@@ -250,7 +263,8 @@ After the summary, offer a small continuation menu — such as "go deeper on any
               const b64 = await readFileBase64(content);
               const pages = await getPdfPageCount(b64);
               userLabel = `[PDF: ${title} (${pages})]`;
-              summaryContent = await extractPdfText(b64, 8000);
+              const extracted = await extractPdfText(b64, 8000);
+              summaryContent = hasReadableText(extracted) ? extracted : '';
             } catch { summaryContent = ''; }
           } else if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
             userLabel = `[IMAGE: ${title}]`;
@@ -306,7 +320,7 @@ After the summary, offer a small continuation menu — such as "go deeper on any
               const pdfInfo = await getPdfPageCount(b64);
               displayMsg = displayMsg.replace(ref, `[@${res.title} ${pdfInfo}]`);
               const pdfText = await extractPdfText(b64, 8000);
-              aiMsg = aiMsg.replace(ref, pdfText ? `[Attached PDF: ${res.title}]\n\`\`\`\n${pdfText}\n\`\`\`` : `[@${res.title} ${pdfInfo}]`);
+              aiMsg = aiMsg.replace(ref, (pdfText && hasReadableText(pdfText)) ? `[Attached PDF: ${res.title}]\n\`\`\`\n${pdfText}\n\`\`\`` : `[@${res.title} ${pdfInfo}]`);
             } else {
               const content = await readFile(res.filePath);
               const fileBlock = `[Attached File: ${res.title}]\n\`\`\`\n${content.slice(0, 4000)}\n\`\`\``;
@@ -783,11 +797,30 @@ After the summary, offer a small continuation menu — such as "go deeper on any
               <BookOpen size={12} /> Explain
             </button>
             <button className="btn btn-ghost" onClick={async () => {
+              const history = useStore.getState().chatMessages;
+              const recent = history.slice(-8).map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n\n');
+              const contextBlock = recent.trim()
+                ? `Recent conversation:\n\n${recent}`
+                : 'There is no conversation history yet, so there is no study content to convert. Tell the user briefly what to do (e.g. paste study material or mention a document with @).';
               setChatLoading(true);
               cancelRef.current = false;
               addChatMessage({ role: 'user', content: 'Generate study flashcards based on recent content', timestamp: Date.now() });
               try {
-                const resp = await aiChat([{ role: 'user', content: 'Generate study flashcards based on recent content' }], 'GenerateFlashcard');
+                const resp = await aiChat([
+                  {
+                    role: 'system',
+                    content: `You convert study material into flashcards. When given readable study content, output a numbered list of flashcards in this exact markdown format (one per distinct concept, term, or fact):
+
+1. **Q:** <question or term>
+   **A:** <concise answer or explanation>
+
+Rules:
+- Keep answers concise (1-3 sentences); preserve key terms, numbers, and definitions exactly.
+- Use the language of the content for the answer when it is a translation task.
+- If the content is unreadable, missing, or contains no study material, do NOT invent cards — say so in one sentence and ask the user to paste readable content or reference a document with @.`,
+                  },
+                  { role: 'user', content: `Generate flashcards from the following study content.\n\n${contextBlock}` },
+                ], 'GenerateFlashcard');
                 if (cancelRef.current) return;
                 addChatMessage({ role: 'assistant', content: resp.content, timestamp: Date.now() });
               } catch (err) { if (cancelRef.current) return; addChatMessage({ role: 'assistant', content: `Error: ${err}`, timestamp: Date.now() }); }
