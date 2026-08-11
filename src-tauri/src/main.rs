@@ -217,7 +217,9 @@ fn parse_flashcards_json(raw: &str) -> Result<Vec<serde_json::Value>, String> {
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
         let mut found = Vec::new();
         collect_flashcard_values(&v, &mut found);
-        if !found.is_empty() { return Ok(found); }
+        // A valid JSON array that is empty is a legitimate "no cards" answer,
+        // not a parse failure.
+        if !found.is_empty() || v.is_array() { return Ok(found); }
     }
 
     // Strategy 2: Strip markdown fences
@@ -231,7 +233,7 @@ fn parse_flashcards_json(raw: &str) -> Result<Vec<serde_json::Value>, String> {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(stripped) {
             let mut found = Vec::new();
             collect_flashcard_values(&v, &mut found);
-            if !found.is_empty() { return Ok(found); }
+            if !found.is_empty() || v.is_array() { return Ok(found); }
         }
     }
 
@@ -294,27 +296,37 @@ async fn generate_flashcard(
 ) -> Result<Vec<Flashcard>, String> {
     let mut messages = vec![ChatMessage {
         role: "system".into(),
-        content: "You are a flashcard generator. Create one or more Q&A flashcards from the user's content.
+        content: "You are a flashcard generator. Create high-quality Q&A flashcards from the study content the user provides.
 
-Return a JSON array (list) of objects. Each object must have these exact keys:
-- \"front\": a question or term label (e.g., \"What does 'avaricious' mean?\")
-- \"back\": the answer or translation (e.g., \"حریص\")
+OUTPUT FORMAT (STRICT):
+- Respond with ONLY a single JSON array of objects. Nothing before it and nothing after it.
+- No markdown, no code fences (```), no backticks, no bullet lists, no commentary.
+- Each object must have exactly these keys:
+  - \"front\": a concise question or term (e.g., \"What does 'avaricious' mean?\")
+  - \"back\": the answer, translation, or explanation (e.g., \"حریص\")
 
-Example for 3 items:
+Example:
 [{\"front\":\"What does 'avaricious' mean?\",\"back\":\"حریص\"},{\"front\":\"What does 'parsimonious' mean?\",\"back\":\"خسیس\"},{\"front\":\"What does 'abject' mean?\",\"back\":\"ذلیل\"}]
 
-Rules:
-- Return a JSON array with one entry per item the user provides.
-- If the user gives a list of words, make one flashcard per word.
-- The front should be the question/prompt in English, back is the answer/translation.
+RULES:
+- Make one flashcard per distinct concept, term, or fact in the content. If the user gives a list of words, make one flashcard per word.
+- The front is the question/prompt, the back is the answer/translation.
+- Keep answers concise (1-3 sentences) and self-contained; preserve key terms, numbers, and definitions exactly.
 - Use valid UTF-8 for non-English text.
-- No markdown, no backticks, no extra text outside the JSON array.".into(),
+- If the content contains no readable study material, return an empty JSON array: []
+- Never refuse, never apologize, never ask for clarification, never generate anything other than the JSON array.".into(),
     }];
     messages.push(ChatMessage {
         role: "user".into(),
         content: format!("Create flashcards from this content:{}\n\n{}",
             source_file.as_ref().map(|f| format!(" (from {})", f)).unwrap_or_default(), content),
     });
+    if content.trim().is_empty() {
+        return Err("No content provided. Paste study material or reference a document to generate flashcards.".to_string());
+    }
+    if looks_binary(&content) {
+        return Err("The provided content appears to be binary/unreadable data (garbled text, scanned or encoded file), so it cannot be converted into flashcards. Paste readable text, or use a text-based PDF/document instead.".to_string());
+    }
     let router = state.ai_router.lock().map_err(|e| e.to_string())?.clone();
     let response = router.route_model(&AIRequest { messages, context: source_file.clone(), task_type: TaskType::GenerateFlashcard }, model.as_deref()).await?;
 
@@ -370,6 +382,92 @@ fn chunk_text(text: &str, max_chunk_size: usize) -> Vec<String> {
     chunks
 }
 
+/// Heuristic check for binary/garbled text. Catches files read with
+/// `from_utf8_lossy` (replacement chars) and binary files that happen to be
+/// valid UTF-8 (high ratio of control chars).
+fn looks_binary(content: &str) -> bool {
+    if content.is_empty() {
+        return false;
+    }
+    let chars: Vec<char> = content.chars().take(4000).collect();
+    if chars.is_empty() {
+        return false;
+    }
+    // from_utf8_lossy inserts U+FFFD for every invalid byte sequence
+    if chars.contains(&'\u{FFFD}') {
+        return true;
+    }
+    let control = chars
+        .iter()
+        .filter(|c| c.is_control() && !matches!(c, '\n' | '\t' | '\r'))
+        .count();
+    control as f32 / chars.len() as f32 > 0.05
+}
+
+fn strip_xml_tags(s: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn unescape_xml_entities(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&#10;", " ")
+        .replace("&#13;", " ")
+        .replace("&amp;", "&")
+}
+
+/// Extract readable text from a .docx (Office Open XML) document.
+fn extract_docx_text(bytes: &[u8]) -> Option<String> {
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
+    let mut doc = archive.by_name("word/document.xml").ok()?;
+    let mut xml = String::new();
+    std::io::Read::read_to_string(&mut doc, &mut xml).ok()?;
+    let xml = xml
+        .replace("</w:p>", "\n")
+        .replace("</w:tr>", "\n")
+        .replace("<w:tab/>", "\t")
+        .replace("<w:br/>", "\n");
+    let text = unescape_xml_entities(&strip_xml_tags(&xml));
+    let text = text
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.trim().is_empty() { None } else { Some(text) }
+}
+
+/// Read a file as text, extracting text from known binary formats (docx)
+/// and rejecting genuinely binary/unreadable content.
+fn text_from_file(path: &std::path::Path, bytes: &[u8]) -> Option<String> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if ext == "docx" || ext == "odt" {
+        return extract_docx_text(bytes);
+    }
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        if looks_binary(s) { None } else { Some(s.to_string()) }
+    } else {
+        let s = String::from_utf8_lossy(bytes).to_string();
+        if looks_binary(&s) { None } else { Some(s) }
+    }
+}
+
 /// Generate flashcards for a single content chunk.
 async fn generate_flashcards_for_chunk(
     router: &AIRouter,
@@ -378,16 +476,20 @@ async fn generate_flashcards_for_chunk(
     collection_id: &Option<String>,
     model: Option<&str>,
 ) -> Result<Vec<Flashcard>, String> {
-    let system_prompt = "You are a flashcard generator. Create Q&A flashcards from the content provided.
+    let system_prompt = "You are a flashcard generator. Create Q&A flashcards from the study content provided.
 
-Return a JSON array of objects. Each object must have these exact keys:
-- \"front\": a question or term
-- \"back\": the answer or explanation
+OUTPUT FORMAT (STRICT):
+- Respond with ONLY a single JSON array of objects. Nothing before it and nothing after it.
+- No markdown, no code fences, no backticks, no commentary.
+- Each object must have exactly these keys:
+  - \"front\": a concise question or term
+  - \"back\": the answer or explanation
 
-Rules:
-- Return a JSON array.
-- Front should be a clear question, back is the answer.
-- No markdown, no backticks, no extra text outside the JSON array.";
+RULES:
+- One flashcard per distinct concept, term, or fact in the content.
+- Keep answers concise (1-3 sentences) and preserve key terms and numbers exactly.
+- If the content contains no readable study material, return an empty JSON array: []
+- Never refuse, never apologize, never ask for clarification, never generate anything other than the JSON array.";
 
     let messages = vec![
         ChatMessage { role: "system".into(), content: system_prompt.into() },
@@ -428,12 +530,7 @@ async fn generate_flashcards_chunked(
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("annotate-studio");
 
-    // Read the file (binary-safe) and convert to text lossily
-    let read_file_lossy = |path: &std::path::Path| -> Result<String, String> {
-        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-        Ok(String::from_utf8_lossy(&bytes).to_string())
-    };
-
+    // Read the file and extract readable text (supports .docx, rejects binary)
     fn resolve_path(workspace: &std::path::Path, source: &str) -> std::path::PathBuf {
         if std::path::Path::new(source).is_absolute() {
             std::path::PathBuf::from(source)
@@ -449,8 +546,16 @@ async fn generate_flashcards_chunked(
     }
 
     let resolved = resolve_path(&workspace, &source_file);
-    let content = read_file_lossy(&resolved)
+    let bytes = std::fs::read(&resolved)
         .map_err(|e| format!("Failed to read '{}': {}", source_file, e))?;
+    let content = text_from_file(&resolved, &bytes)
+        .ok_or_else(|| format!(
+            "'{}' appears to be a binary or encoded file (e.g. a scanned PDF or image) whose text cannot be extracted. Use a text-based PDF/document or paste the content directly.",
+            source_file
+        ))?;
+    if content.trim().is_empty() {
+        return Err(format!("'{}' contains no readable text.", source_file));
+    }
 
     const MAX_CHUNK_SIZE: usize = 12_000;
     let chunks = chunk_text(&content, MAX_CHUNK_SIZE);
@@ -462,6 +567,7 @@ async fn generate_flashcards_chunked(
     router.load_from_disk(&providers_path);
 
     let mut all_cards = Vec::new();
+    let mut last_chunk_error: Option<String> = None;
 
     for (i, chunk) in chunks.iter().enumerate() {
         let preview: String = chunk.chars().take(60).collect();
@@ -473,12 +579,15 @@ async fn generate_flashcards_chunked(
 
         match generate_flashcards_for_chunk(&router, chunk, &source_file, &collection_id, None).await {
             Ok(cards) => all_cards.extend(cards),
-            Err(_) => { /* skip chunk on failure */ }
+            Err(e) => last_chunk_error = Some(e),
         }
     }
 
     if all_cards.is_empty() {
-        return Err("No flashcards could be generated from this document.".to_string());
+        return Err(match last_chunk_error {
+            Some(e) => format!("No flashcards could be generated from this document: {}", e),
+            None => "No flashcards could be generated from this document.".to_string(),
+        });
     }
 
     // Save cards to disk

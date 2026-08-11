@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@100;200;300;400;500;600;700;800;900&display=swap');
 
 :root {
   /* White Theme (Default) */
@@ -135,11 +136,6 @@ html, body {
   height: 100%;
   overflow: hidden;
   background: var(--bg-app);
-  background-image: var(--bg-image, none);
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-attachment: fixed;
   color: var(--text-primary);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -402,6 +398,82 @@ kbd {
   -ms-overflow-style: none;
 }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
+
+/* ── Ocean Theme ─────────────────────────── */
+[data-theme="ocean"] {
+  --bg-app: #F0F7FA;
+  --bg-surface: #E0EFF5;
+  --bg-card: #F4FAFD;
+  --bg-elevated: #D6EAF2;
+  --bg-glass: rgba(244, 250, 253, 0.82);
+  --bg-overlay: rgba(10, 40, 60, 0.3);
+
+  --text-primary: #0C2D48;
+  --text-secondary: #3A6B8C;
+  --text-muted: #7FA8C2;
+
+  --border: #B8D8E8;
+  --border-subtle: rgba(184, 216, 232, 0.5);
+  --border-hover: #A0CCE0;
+
+  --primary-light: rgba(6, 148, 201, 0.15);
+}
+
+/* ── Lavender Theme ──────────────────────── */
+[data-theme="lavender"] {
+  --bg-app: #F5F0FA;
+  --bg-surface: #EDE5F5;
+  --bg-card: #FAF7FD;
+  --bg-elevated: #E5DAF0;
+  --bg-glass: rgba(250, 247, 253, 0.82);
+  --bg-overlay: rgba(40, 20, 60, 0.3);
+
+  --text-primary: #1E0A3C;
+  --text-secondary: #6B4D8A;
+  --text-muted: #A88CC4;
+
+  --border: #D4C4E4;
+  --border-subtle: rgba(212, 196, 228, 0.5);
+  --border-hover: #C4B0D8;
+
+  --primary-light: rgba(139, 92, 246, 0.15);
+}
+
+/* ── Rose Theme ──────────────────────────── */
+[data-theme="rose"] {
+  --bg-app: #FFF5F5;
+  --bg-surface: #FFE8E8;
+  --bg-card: #FFFAFA;
+  --bg-elevated: #FDDADA;
+  --bg-glass: rgba(255, 250, 250, 0.82);
+  --bg-overlay: rgba(60, 20, 20, 0.3);
+
+  --text-primary: #3C1010;
+  --text-secondary: #8A4D4D;
+  --text-muted: #C48A8A;
+
+  --border: #E8C4C4;
+  --border-subtle: rgba(232, 196, 196, 0.5);
+  --border-hover: #D8B0B0;
+
+  --primary-light: rgba(236, 72, 153, 0.15);
+}
+
+/* ── RTL Support ─────────────────────────── */
+[dir="rtl"] .chat-bubble-user {
+  border-radius: 16px 16px 16px 4px !important;
+}
+[dir="rtl"] .chat-bubble-assistant {
+  border-radius: 16px 16px 4px 16px !important;
+}
+[dir="rtl"] blockquote {
+  border-left: none !important;
+  border-right: 3px solid var(--primary) !important;
+}
+[dir="rtl"] ul, [dir="rtl"] ol {
+  padding-left: 0 !important;
+  padding-right: 20px !important;
+}
 
 /* ── Flashcard Layout responsive ─────────── */
 @media (max-width: 768px) {

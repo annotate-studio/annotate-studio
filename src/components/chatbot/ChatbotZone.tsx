@@ -11,6 +11,13 @@ import Dialog from '@/components/ui/Dialog';
 let _pdfjsLoaded = false;
 let _pdfjsLoading: Promise<void> | null = null;
 
+function isRTL(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  const rtlChars = /[\u0591-\u07FF\u200F\u202B\u202E\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+  return rtlChars.test(trimmed[0]);
+}
+
 async function loadPdfjs(): Promise<void> {
   if (_pdfjsLoaded) return;
   if (_pdfjsLoading) return _pdfjsLoading;
@@ -40,6 +47,19 @@ async function getPdfPageCount(base64: string): Promise<string> {
   const pages = pdf.numPages;
   pdf.destroy();
   return `${pages} page${pages > 1 ? 's' : ''}`;
+}
+
+/** True if the extracted text looks like real readable content, not binary garbage or an empty scrape. */
+function hasReadableText(text: string): boolean {
+  const sample = text.trim();
+  if (sample.length < 20) return false;
+  const body = sample.slice(0, 3000);
+  let printable = 0;
+  for (const ch of body) {
+    if (ch === '\uFFFD') return false;
+    if (ch === '\n' || ch === '\t' || ch === '\r' || ch >= ' ') printable++;
+  }
+  return printable / Math.max(1, body.length) > 0.95;
 }
 
 async function extractPdfText(base64: string, maxChars = 3000): Promise<string> {
@@ -250,7 +270,8 @@ After the summary, offer a small continuation menu — such as "go deeper on any
               const b64 = await readFileBase64(content);
               const pages = await getPdfPageCount(b64);
               userLabel = `[PDF: ${title} (${pages})]`;
-              summaryContent = await extractPdfText(b64, 8000);
+              const extracted = await extractPdfText(b64, 8000);
+              summaryContent = hasReadableText(extracted) ? extracted : '';
             } catch { summaryContent = ''; }
           } else if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
             userLabel = `[IMAGE: ${title}]`;
@@ -306,7 +327,7 @@ After the summary, offer a small continuation menu — such as "go deeper on any
               const pdfInfo = await getPdfPageCount(b64);
               displayMsg = displayMsg.replace(ref, `[@${res.title} ${pdfInfo}]`);
               const pdfText = await extractPdfText(b64, 8000);
-              aiMsg = aiMsg.replace(ref, pdfText ? `[Attached PDF: ${res.title}]\n\`\`\`\n${pdfText}\n\`\`\`` : `[@${res.title} ${pdfInfo}]`);
+              aiMsg = aiMsg.replace(ref, (pdfText && hasReadableText(pdfText)) ? `[Attached PDF: ${res.title}]\n\`\`\`\n${pdfText}\n\`\`\`` : `[@${res.title} ${pdfInfo}]`);
             } else {
               const content = await readFile(res.filePath);
               const fileBlock = `[Attached File: ${res.title}]\n\`\`\`\n${content.slice(0, 4000)}\n\`\`\``;
@@ -715,17 +736,21 @@ After the summary, offer a small continuation menu — such as "go deeper on any
                 <div style={{ fontSize: 12 }}>Ask anything about your studies</div>
               </div>
             )}
-            {chatMessages.map((msg, i) => (
-              <div key={i} className="animate-morph-in" style={{
+            {chatMessages.map((msg, i) => {
+              const msgRtl = msg.role === 'user' ? isRTL(msg.content) : false;
+              return (
+              <div key={i} className={`animate-morph-in ${msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-assistant'}`} style={{
                 alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
                 maxWidth: '88%',
-                borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                borderRadius: msg.role === 'user'
+                  ? (msgRtl ? '16px 16px 16px 4px' : '16px 16px 4px 16px')
+                  : '16px 16px 16px 4px',
                 background: msg.role === 'user' ? 'var(--primary)' : 'var(--bg-surface)',
                 color: msg.role === 'user' ? 'white' : 'var(--text-primary)',
                 fontSize: 14, lineHeight: 1.7, wordBreak: 'break-word', overflowWrap: 'break-word',
               }}>
                 {msg.role === 'user' ? (
-                  <div className="content-selectable" style={{ padding: '10px 14px', whiteSpace: 'pre-wrap', userSelect: 'text' }}>{msg.content}</div>
+                  <div className="content-selectable" style={{ padding: '10px 14px', whiteSpace: 'pre-wrap', userSelect: 'text', textAlign: msgRtl ? 'right' : 'left', direction: msgRtl ? 'rtl' : 'ltr', fontFamily: msgRtl ? "'Vazirmatn', 'Inter', sans-serif" : undefined }}>{msg.content}</div>
                 ) : (
                   <div className="content-selectable" style={{ padding: '10px 14px', userSelect: 'text' }}>
                     <MarkdownRenderer content={msg.content} />
@@ -751,7 +776,8 @@ After the summary, offer a small continuation menu — such as "go deeper on any
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
             {chatLoading && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'flex-start', padding: '8px 12px' }}>
                 <div style={{ display: 'flex', gap: 4 }}>
@@ -783,11 +809,30 @@ After the summary, offer a small continuation menu — such as "go deeper on any
               <BookOpen size={12} /> Explain
             </button>
             <button className="btn btn-ghost" onClick={async () => {
+              const history = useStore.getState().chatMessages;
+              const recent = history.slice(-8).map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n\n');
+              const contextBlock = recent.trim()
+                ? `Recent conversation:\n\n${recent}`
+                : 'There is no conversation history yet, so there is no study content to convert. Tell the user briefly what to do (e.g. paste study material or mention a document with @).';
               setChatLoading(true);
               cancelRef.current = false;
               addChatMessage({ role: 'user', content: 'Generate study flashcards based on recent content', timestamp: Date.now() });
               try {
-                const resp = await aiChat([{ role: 'user', content: 'Generate study flashcards based on recent content' }], 'GenerateFlashcard');
+                const resp = await aiChat([
+                  {
+                    role: 'system',
+                    content: `You convert study material into flashcards. When given readable study content, output a numbered list of flashcards in this exact markdown format (one per distinct concept, term, or fact):
+
+1. **Q:** <question or term>
+   **A:** <concise answer or explanation>
+
+Rules:
+- Keep answers concise (1-3 sentences); preserve key terms, numbers, and definitions exactly.
+- Use the language of the content for the answer when it is a translation task.
+- If the content is unreadable, missing, or contains no study material, do NOT invent cards — say so in one sentence and ask the user to paste readable content or reference a document with @.`,
+                  },
+                  { role: 'user', content: `Generate flashcards from the following study content.\n\n${contextBlock}` },
+                ], 'GenerateFlashcard');
                 if (cancelRef.current) return;
                 addChatMessage({ role: 'assistant', content: resp.content, timestamp: Date.now() });
               } catch (err) { if (cancelRef.current) return; addChatMessage({ role: 'assistant', content: `Error: ${err}`, timestamp: Date.now() }); }

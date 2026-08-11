@@ -24,6 +24,13 @@ const QUOTES = [
   'Wake up with determination. Go to bed with satisfaction.',
 ];
 
+function isRTL(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  const rtlChars = /[\u0591-\u07FF\u200F\u202B\u202E\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+  return rtlChars.test(trimmed[0]);
+}
+
 function formatTime(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -382,7 +389,9 @@ export default function MotivationTab() {
               Hi, I&apos;m your study counselor. Share what&apos;s on your mind — I&apos;m here to listen and help.
             </div>
           )}
-          {motivationMessages.map((m, i) => (
+          {motivationMessages.map((m, i) => {
+            const msgRtl = m.role === 'user' ? isRTL(m.content) : false;
+            return (
             <div key={i} style={{
               alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
               maxWidth: '85%',
@@ -390,11 +399,16 @@ export default function MotivationTab() {
             }}>
               <div className="content-selectable" style={{
                 padding: '10px 14px',
-                borderRadius: m.role === 'user' ? 'var(--radius-md) var(--radius-md) 4px var(--radius-md)' : 'var(--radius-md) var(--radius-md) var(--radius-md) 4px',
+                borderRadius: m.role === 'user'
+                  ? (msgRtl ? 'var(--radius-md) var(--radius-md) var(--radius-md) 4px' : 'var(--radius-md) var(--radius-md) 4px var(--radius-md)')
+                  : 'var(--radius-md) var(--radius-md) var(--radius-md) 4px',
                 background: m.role === 'user' ? 'var(--primary)' : 'var(--bg-elevated)',
                 color: m.role === 'user' ? 'var(--primary-text)' : 'var(--text-primary)',
                 fontSize: 13,
                 lineHeight: 1.6,
+                textAlign: msgRtl ? 'right' : 'left',
+                direction: msgRtl ? 'rtl' : 'ltr',
+                fontFamily: msgRtl ? "'Vazirmatn', 'Inter', sans-serif" : undefined,
               }}>
                 {m.role === 'user' ? m.content : <MarkdownRenderer content={m.content} />}
               </div>
@@ -406,7 +420,8 @@ export default function MotivationTab() {
                 {formatTime(m.timestamp)}
               </div>
             </div>
-          ))}
+            );
+          })}
           {loading && (
             <div style={{ alignSelf: 'flex-start', animation: 'fadeInUp 0.2s ease' }}>
               <div style={{ padding: '10px 14px', borderRadius: 'var(--radius-md) var(--radius-md) var(--radius-md) 4px', background: 'var(--bg-elevated)', fontSize: 13 }}>

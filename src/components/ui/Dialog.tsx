@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import IconButton from './IconButton';
 import { X } from 'lucide-react';
 
 interface DialogProps {
@@ -34,13 +33,26 @@ export default function Dialog({ open, onClose, title, children, width = 400 }: 
         className='card w-full max-w-[90vw] overflow-hidden'
         style={{ width }}
       >
-        <div className='flex items-center justify-between px-4 py-3.5 border-b border-[var(--border)]'>
-          <span className='text-sm font-semibold text-[var(--text-primary)]'>{title}</span>
-          <IconButton onClick={onClose} variant='default' size='sm' aria-label='Close'>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '14px 18px',
+          borderBottom: '1px solid var(--border)',
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+            {title}
+          </span>
+          <button
+            onClick={onClose}
+            className="btn btn-ghost"
+            style={{ padding: '2px 6px', borderRadius: 'var(--radius-sm)' }}
+            aria-label="Close"
+          >
             <X size={14} />
-          </IconButton>
+          </button>
         </div>
-        <div className='px-4 py-4'>{children}</div>
+        <div style={{ padding: '16px 18px' }}>
+          {children}
+        </div>
       </div>
     </div>
   );

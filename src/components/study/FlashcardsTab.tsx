@@ -26,6 +26,19 @@ const STAT_META = [
 let _pdfjsLoaded = false;
 let _pdfjsLoading: Promise<void> | null = null;
 
+/** True if the extracted text looks like real readable content, not binary garbage or an empty scrape. */
+function hasReadableText(text: string): boolean {
+  const sample = text.trim();
+  if (sample.length < 20) return false;
+  const body = sample.slice(0, 3000);
+  let printable = 0;
+  for (const ch of body) {
+    if (ch === '\uFFFD') return false;
+    if (ch === '\n' || ch === '\t' || ch === '\r' || ch >= ' ') printable++;
+  }
+  return printable / Math.max(1, body.length) > 0.95;
+}
+
 async function loadPdfjs(): Promise<void> {
   if (_pdfjsLoaded) return;
   if (_pdfjsLoading) return _pdfjsLoading;
@@ -319,12 +332,21 @@ function FlashcardsTab() {
         if (isPdf) {
           const b64 = await readFileBase64(genSourceFile);
           const text = await extractPdfText(b64, 24000);
+          if (!hasReadableText(text)) {
+            setGenError('No readable text could be extracted from this PDF. It may be a scanned or image-based document — paste the text manually instead.');
+            return;
+          }
           cards = await generateFlashcard(text, genSourceFile, activeCollectionId ?? undefined);
         } else {
           cards = await generateFlashcardsChunked(genSourceFile, activeCollectionId ?? undefined);
         }
       } else {
-        cards = await generateFlashcard(generateContent.trim(), undefined, activeCollectionId ?? undefined);
+        const pasted = generateContent.trim();
+        if (!hasReadableText(pasted)) {
+          setGenError('The pasted content appears to be unreadable (binary/garbled data). Paste readable text or reference a text/PDF document instead.');
+          return;
+        }
+        cards = await generateFlashcard(pasted, undefined, activeCollectionId ?? undefined);
       }
       if (cards.length === 0) { setGenError('AI returned no flashcards. Try different content.'); return; }
       setFlashcards([...useStore.getState().flashcards, ...cards]);
@@ -431,9 +453,10 @@ function FlashcardsTab() {
       <Dialog open={showGenerate} onClose={() => { setShowGenerate(false); setGenError(''); setGenSourceFile(undefined); }} title="Generate Flashcards with AI" width={520}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {genSourceFile && (
-            <div style={{ fontSize: 11, color: 'var(--primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <FileText size={12} /> Document: {genSourceFile}
-              <button onClick={() => setGenSourceFile(undefined)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11 }}>Clear</button>
+            <div style={{ fontSize: 11, color: 'var(--primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px', background: 'var(--primary-light)', borderRadius: 'var(--radius-sm)', flexShrink: 0 }}>
+              <FileText size={12} style={{ flexShrink: 0 }} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>Document: {genSourceFile}</span>
+              <button onClick={() => setGenSourceFile(undefined)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>Clear</button>
             </div>
           )}
           <textarea
@@ -498,8 +521,8 @@ function FlashcardsTab() {
               </div>
             </div>
           )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <button className="btn btn-primary" onClick={handleGenerate} disabled={generating}>
                 {generating ? (genProgress ? 'Processing...' : 'Generating...') : 'Generate'}
               </button>
@@ -509,44 +532,47 @@ function FlashcardsTab() {
             </div>
             <div ref={genProviderRef} style={{ position: 'relative' }}>
               <button className="btn btn-ghost" onClick={() => setGenProviderMenu(v => !v)}
-                style={{ fontSize: 11, padding: '4px 10px', gap: 3, display: 'flex', alignItems: 'center' }}>
-                <Zap size={12} /> {genSelectedProvider || (useStore.getState().selectedModel || 'Model')}
-                <ChevronDown size={11} />
+                style={{ fontSize: 12, padding: '8px 12px', gap: 4, display: 'flex', alignItems: 'center', maxWidth: 220 }}>
+                <Zap size={13} style={{ flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{genSelectedProvider || (useStore.getState().selectedModel || 'Model')}</span>
+                <ChevronDown size={11} style={{ flexShrink: 0 }} />
               </button>
-              {genProviderMenu && genProviderRef.current && (() => {
-                const r = genProviderRef.current.getBoundingClientRect();
-                return (
-                  <div style={{
-                    position: 'fixed', top: r.bottom + 4,
-                    right: window.innerWidth - r.right,
-                    zIndex: 2147483647,
-                    background: 'var(--bg-card)', border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-md)', padding: 4, minWidth: 200,
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                  }}>
-                    {genProviderOpts.length === 0 && (
-                      <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-muted)' }}>
-                        No providers. Add one in Settings.
-                      </div>
-                    )}
-                    {genProviderOpts.map((opt, i) => (
-                      <button key={i} onClick={() => { setGenSelectedProvider(opt.label); setGenProviderMenu(false); }}
-                        style={{
-                          display: 'block', width: '100%', textAlign: 'left', padding: '7px 14px', fontSize: 12,
-                          border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'inherit',
-                          background: genSelectedProvider === opt.label ? 'var(--primary-light)' : 'transparent',
-                          color: genSelectedProvider === opt.label ? 'var(--primary)' : 'var(--text-secondary)',
-                        }}>
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                );
-              })()}
+              {genProviderMenu && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 2147483647,
+                  background: 'var(--bg-card)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)', padding: 4, minWidth: 200,
+                  maxWidth: 'min(300px, calc(100vw - 32px))', maxHeight: 260, overflowY: 'auto',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                }}>
+                  {genProviderOpts.length === 0 && (
+                    <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-muted)' }}>
+                      No providers. Add one in Settings.
+                    </div>
+                  )}
+                  {genProviderOpts.map((opt, i) => (
+                    <button key={i} onClick={() => { setGenSelectedProvider(opt.label); setGenProviderMenu(false); }}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left', padding: '7px 14px', fontSize: 12,
+                        border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'inherit',
+                        background: genSelectedProvider === opt.label ? 'var(--primary-light)' : 'transparent',
+                        color: genSelectedProvider === opt.label ? 'var(--primary)' : 'var(--text-secondary)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           {genError && (
-            <div style={{ fontSize: 12, color: 'var(--danger)', padding: '6px 10px', background: 'var(--danger-light)', borderRadius: 'var(--radius-sm)' }}>
+            <div style={{
+              fontSize: 12, color: 'var(--danger)', padding: '8px 12px',
+              background: 'var(--danger-light)', borderRadius: 'var(--radius-sm)',
+              wordBreak: 'break-word', overflowWrap: 'anywhere',
+              maxHeight: 140, overflowY: 'auto', lineHeight: 1.5, flexShrink: 0,
+            }}>
               {genError}
             </div>
           )}

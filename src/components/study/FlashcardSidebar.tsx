@@ -52,10 +52,14 @@ export default function FlashcardSidebar() {
     setDialogRename(null);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!dialogDelete) return;
     removeCollection(dialogDelete.id);
     setDialogDelete(null);
+    try {
+      const stats = await getFlashcardStats().catch(() => null);
+      if (stats) setFlashcardStats(stats);
+    } catch {}
   };
 
   const openMenu = (col: { id: string; name: string }) => {

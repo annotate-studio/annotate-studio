@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useMemo } from 'react';
-import { FileText, Image as ImageIcon, HelpCircle, Eye, Trash2, FileType, Search, Clock, Calendar, ExternalLink } from 'lucide-react';
+import { FileText, Image as ImageIcon, HelpCircle, Trash2, FileType, Search, Clock, Calendar, ExternalLink } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { getAllFiles, logRecentDocument, getRecentDocuments, deleteWorkspaceFile } from '@/lib/tauri-commands';
 import type { StudyFile } from '@/lib/tauri-commands';
@@ -91,7 +91,7 @@ export default function DocumentsTab() {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+      <div style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
         {loading ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60%', gap: 10 }}>
             <div style={{ width: 18, height: 18, border: '2px solid var(--border)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} />
@@ -108,7 +108,12 @@ export default function DocumentsTab() {
             <div style={{ fontSize: 12 }}>{search ? 'Try a different search term' : 'Drop files on the Canvas to add them'}</div>
           </div>
         ) : (
-          <div style={{ display: 'flex', gap: 20, overflowX: 'auto', overflowY: 'hidden', padding: '8px 4px 16px', height: '100%', alignItems: 'flex-start' }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+            gap: 16,
+            alignContent: 'start',
+          }}>
             {filtered.map((doc) => {
               const meta = typeMeta[doc.file_type] || typeMeta.Unknown;
               const isHovered = hoveredId === doc.id;
@@ -121,77 +126,54 @@ export default function DocumentsTab() {
                   onClick={() => setPreviewDoc(doc)}
                   className="card"
                   style={{
-                    flexShrink: 0, width: 240, padding: 0, overflow: 'hidden',
+                    padding: 0, overflow: 'hidden',
                     borderRadius: 'var(--radius-md)', border: '1px solid var(--border)',
-                    cursor: 'pointer', position: 'relative',
+                    cursor: 'pointer',
                     transition: 'transform 0.2s ease, box-shadow 0.2s ease',
                     transform: isHovered ? 'translateY(-4px)' : 'none',
-                    boxShadow: isHovered ? '0 8px 25px rgba(0,0,0,0.12)' : '0 1px 3px rgba(0,0,0,0.04)',
+                    boxShadow: isHovered ? '0 10px 28px rgba(0,0,0,0.12)' : '0 1px 3px rgba(0,0,0,0.04)',
                   }}
                 >
                   <div style={{
-                    height: 180, background: meta.bg,
+                    height: 150, background: meta.bg,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexDirection: 'column', gap: 8, position: 'relative',
+                    flexDirection: 'column', gap: 8,
                   }}>
                     {meta.icon}
                     <span style={{
-                      fontSize: 13, fontWeight: 700, letterSpacing: '0.08em',
+                      fontSize: 12, fontWeight: 700, letterSpacing: '0.1em',
                       color: meta.color, opacity: 0.5,
                     }}>
                       {meta.label}
                     </span>
-
-                    <div style={{
-                      position: 'absolute', inset: 0,
-                      background: 'rgba(0,0,0,0.4)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12,
-                      pointerEvents: isHovered ? 'auto' : 'none',
-                      opacity: isHovered ? 1 : 0,
-                      transition: 'opacity 0.18s ease',
-                    }}>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleOpen(doc); }}
-                        style={{
-                          width: 42, height: 42, borderRadius: '50%', border: 'none',
-                          background: 'rgba(255,255,255,0.95)', cursor: 'pointer',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          color: '#374151', transition: 'transform 0.15s',
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.1)'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-                        title="Open on canvas"
-                      >
-                        <Eye size={18} />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setDeleteTarget(doc); }}
-                        style={{
-                          width: 42, height: 42, borderRadius: '50%', border: 'none',
-                          background: 'rgba(255,255,255,0.95)', cursor: 'pointer',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          color: '#DC2626', transition: 'transform 0.15s',
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.1)'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-                        title="Delete"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
                   </div>
 
                   <div style={{ padding: '12px 14px' }}>
                     <div style={{
                       fontSize: 14, fontWeight: 600, color: 'var(--text-primary)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      marginBottom: 4,
+                      marginBottom: 8,
                     }}>
                       {doc.name}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Calendar size={11} />
-                      {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : 'Unknown'}
+                    <div style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      gap: 8, fontSize: 11, color: 'var(--text-muted)',
+                    }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, overflow: 'hidden' }}>
+                        <Calendar size={11} style={{ flexShrink: 0 }} />
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : 'Unknown'}
+                        </span>
+                      </span>
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        fontSize: 10, fontWeight: 600, color: meta.color,
+                        background: meta.bg, padding: '2px 6px', borderRadius: 'var(--radius-pill)',
+                        flexShrink: 0,
+                      }}>
+                        {meta.label}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -235,12 +217,16 @@ export default function DocumentsTab() {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 14px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
-                  <Calendar size={13} />
+                  <Calendar size={13} style={{ flexShrink: 0 }} />
                   <span>Created: {previewDoc.created_at ? new Date(previewDoc.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Unknown'}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
-                  <Clock size={13} />
+                  <Clock size={13} style={{ flexShrink: 0 }} />
                   <span>Last opened: {previewDoc.lastOpened ? new Date(previewDoc.lastOpened).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Never'}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                  <FileText size={13} style={{ flexShrink: 0 }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{previewDoc.path}</span>
                 </div>
               </div>
 
