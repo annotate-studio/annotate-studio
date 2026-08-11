@@ -11,6 +11,13 @@ import Dialog from '@/components/ui/Dialog';
 let _pdfjsLoaded = false;
 let _pdfjsLoading: Promise<void> | null = null;
 
+function isRTL(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  const rtlChars = /[\u0591-\u07FF\u200F\u202B\u202E\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+  return rtlChars.test(trimmed[0]);
+}
+
 async function loadPdfjs(): Promise<void> {
   if (_pdfjsLoaded) return;
   if (_pdfjsLoading) return _pdfjsLoading;
@@ -729,17 +736,21 @@ After the summary, offer a small continuation menu — such as "go deeper on any
                 <div style={{ fontSize: 12 }}>Ask anything about your studies</div>
               </div>
             )}
-            {chatMessages.map((msg, i) => (
-              <div key={i} className="animate-morph-in" style={{
+            {chatMessages.map((msg, i) => {
+              const msgRtl = msg.role === 'user' ? isRTL(msg.content) : false;
+              return (
+              <div key={i} className={`animate-morph-in ${msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-assistant'}`} style={{
                 alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
                 maxWidth: '88%',
-                borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                borderRadius: msg.role === 'user'
+                  ? (msgRtl ? '16px 16px 16px 4px' : '16px 16px 4px 16px')
+                  : '16px 16px 16px 4px',
                 background: msg.role === 'user' ? 'var(--primary)' : 'var(--bg-surface)',
                 color: msg.role === 'user' ? 'white' : 'var(--text-primary)',
                 fontSize: 14, lineHeight: 1.7, wordBreak: 'break-word', overflowWrap: 'break-word',
               }}>
                 {msg.role === 'user' ? (
-                  <div className="content-selectable" style={{ padding: '10px 14px', whiteSpace: 'pre-wrap', userSelect: 'text' }}>{msg.content}</div>
+                  <div className="content-selectable" style={{ padding: '10px 14px', whiteSpace: 'pre-wrap', userSelect: 'text', textAlign: msgRtl ? 'right' : 'left', direction: msgRtl ? 'rtl' : 'ltr', fontFamily: msgRtl ? "'Vazirmatn', 'Inter', sans-serif" : undefined }}>{msg.content}</div>
                 ) : (
                   <div className="content-selectable" style={{ padding: '10px 14px', userSelect: 'text' }}>
                     <MarkdownRenderer content={msg.content} />
@@ -765,7 +776,8 @@ After the summary, offer a small continuation menu — such as "go deeper on any
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
             {chatLoading && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'flex-start', padding: '8px 12px' }}>
                 <div style={{ display: 'flex', gap: 4 }}>

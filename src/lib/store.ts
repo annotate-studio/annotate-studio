@@ -13,7 +13,7 @@ export interface FlashcardCollection {
 }
 
 export type ViewMode = 'canvas' | 'flashcards' | 'exams' | 'documents' | 'settings' | 'pomodoro' | 'motivation';
-export type ThemeMode = 'white' | 'black' | 'sepia' | 'gray' | 'forest';
+export type ThemeMode = 'white' | 'black' | 'sepia' | 'gray' | 'forest' | 'ocean' | 'lavender' | 'rose';
 
 export interface AppSettings {
   theme: ThemeMode;

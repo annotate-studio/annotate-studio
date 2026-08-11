@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Sun, Moon, Palette, Cpu, Zap, Wifi, WifiOff, RefreshCw, Trash2, CheckCircle, Circle, Monitor, Image as ImageIcon, Music, Volume2 } from 'lucide-react';
+import { Sun, Moon, Palette, Cpu, Zap, Wifi, WifiOff, RefreshCw, Trash2, CheckCircle, Circle, Monitor, Music, Volume2 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { addAIProvider, testAIProvider, getAIProviders, checkOllama, removeAIProvider, setDefaultAIProvider, exportData, importData, saveCardQualities, type AIResponse } from '@/lib/tauri-commands';
 import { save, open } from '@tauri-apps/plugin-dialog';
@@ -15,12 +15,15 @@ const SIDEBAR_ITEMS: { id: SettingsPane; label: string; icon: React.ReactNode }[
   { id: 'data', label: 'Data', icon: <RefreshCw size={16} /> },
 ];
 
-const THEMES: { id: 'white' | 'black' | 'sepia' | 'gray' | 'forest'; icon: React.ReactNode; label: string; desc: string; bg: string; fg: string }[] = [
+const THEMES: { id: 'white' | 'black' | 'sepia' | 'gray' | 'forest' | 'ocean' | 'lavender' | 'rose'; icon: React.ReactNode; label: string; desc: string; bg: string; fg: string }[] = [
   { id: 'white', icon: <Sun size={20} />, label: 'White', desc: 'Clean light theme', bg: 'var(--bg-card)', fg: 'var(--text-primary)' },
   { id: 'black', icon: <Moon size={20} />, label: 'Black', desc: 'OLED dark theme', bg: '#18181B', fg: '#FAFAFA' },
   { id: 'sepia', icon: <Sun size={20} />, label: 'Sepia', desc: 'Warm paper tone', bg: '#FFF8F0', fg: '#2C1810' },
   { id: 'gray', icon: <Moon size={20} />, label: 'Gray', desc: 'Neutral gray', bg: '#FAFAFB', fg: '#1F2024' },
   { id: 'forest', icon: <Sun size={20} />, label: 'Forest', desc: 'Calm green', bg: '#F8FFF8', fg: '#1A2E1A' },
+  { id: 'ocean', icon: <Sun size={20} />, label: 'Ocean', desc: 'Cool blue', bg: '#F4FAFD', fg: '#0C2D48' },
+  { id: 'lavender', icon: <Sun size={20} />, label: 'Lavender', desc: 'Soft purple', bg: '#FAF7FD', fg: '#1E0A3C' },
+  { id: 'rose', icon: <Sun size={20} />, label: 'Rose', desc: 'Warm pink', bg: '#FFFAFA', fg: '#3C1010' },
 ];
 
 const SOUNDS = ['beep', 'bell', 'chime', 'digital'];
@@ -30,7 +33,7 @@ const PRESET_COLORS = ['#2563EB', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#
 export default function SettingsTab() {
   const {
     theme, setTheme, primaryColor, setPrimaryColor,
-    appScale, setAppScale, backgroundImage, setBackgroundImage,
+    appScale, setAppScale,
     pomodoroSound, setPomodoroSound, saveSettingsToDisk,
   } = useStore();
   const [pane, setPane] = useState<SettingsPane>('appearance');
@@ -45,7 +48,7 @@ export default function SettingsTab() {
   const [testing, setTesting] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => { saveSettingsToDisk(); }, [theme, primaryColor, appScale, backgroundImage, pomodoroSound]);
+  useEffect(() => { saveSettingsToDisk(); }, [theme, primaryColor, appScale, pomodoroSound]);
 
   const refreshProviders = useCallback(async () => {
     try { setProviders(await getAIProviders()); } catch {}
@@ -143,25 +146,6 @@ export default function SettingsTab() {
                     }}
                   />
                 ))}
-              </div>
-            </div>
-
-            <div className="card" style={{ padding: 20 }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 12 }}>
-                <ImageIcon size={14} style={{ marginRight: 6 }} /> Custom Background
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input className="input" value={backgroundImage} onChange={(e) => setBackgroundImage(e.target.value)}
-                  placeholder="Paste image URL or leave empty" style={{ fontSize: 12 }} />
-                {backgroundImage && (
-                  <button className="btn btn-ghost no-hover" onClick={() => setBackgroundImage('')}
-                    style={{ fontSize: 12, flexShrink: 0 }}>
-                    Clear
-                  </button>
-                )}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
-                Set a background image URL for the app. Cleared by default.
               </div>
             </div>
           </div>

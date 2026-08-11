@@ -2,7 +2,7 @@
 
 import React from 'react';
 
-type TrafficAction = 'minimize' | 'maximize' | 'close';
+type TrafficAction = 'minimize' | 'maximize' | 'close' | 'exitFullscreen';
 
 interface TrafficLightsProps {
   onAction: (action: TrafficAction) => void;
@@ -54,7 +54,7 @@ export default function TrafficLights({ onAction, isFullscreen, showMaximize = t
       </button>
       {showMaximize && (
         <button
-          onClick={(e) => { e.stopPropagation(); onAction(isFullscreen ? 'close' : 'maximize'); }}
+          onClick={(e) => { e.stopPropagation(); onAction(isFullscreen ? 'exitFullscreen' : 'maximize'); }}
           style={{ ...btnBase, background: colors.maximize.bg }}
           title={isFullscreen ? 'Exit Fullscreen' : 'Maximize'}>
           <Dot label={isFullscreen ? '−' : '+'} color={colors.maximize} />
