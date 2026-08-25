@@ -63,6 +63,14 @@ function ResourceContent({ resource }: { resource: Resource }) {
     return () => { cancelled = true; };
   }, [resource.type, resource.filePath, resource.content]);
 
+  const handleAskAi = useCallback((text?: string) => {
+    setChatbotOpen(true);
+    setSummarizeTarget({
+      content: text || resource.filePath || resource.id,
+      title: resource.title,
+    });
+  }, [resource.id, resource.filePath, resource.title, setChatbotOpen, setSummarizeTarget]);
+
   if (resource.type === 'pdf') {
     if (!blobUrl) {
       return (
@@ -76,7 +84,7 @@ function ResourceContent({ resource }: { resource: Resource }) {
     }
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <PdfViewer blobUrl={blobUrl} resourceId={resource.filePath || resource.id} onAskAi={(text) => { setChatbotOpen(true); setSummarizeTarget({ content: text || resource.filePath || '', title: resource.title }); }} />
+        <PdfViewer blobUrl={blobUrl} resourceId={resource.filePath || resource.id} onAskAi={handleAskAi} />
       </div>
     );
   }

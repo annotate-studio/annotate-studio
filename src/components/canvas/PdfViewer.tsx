@@ -73,7 +73,33 @@ const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function PdfViewer
     createPluginRegistration(RenderPluginPackage),
     createPluginRegistration(InteractionManagerPluginPackage),
     createPluginRegistration(SelectionPluginPackage),
-    createPluginRegistration(AnnotationPluginPackage, { annotationAuthor: 'User', selectAfterCreate: false }),
+    createPluginRegistration(AnnotationPluginPackage, {
+      annotationAuthor: 'User',
+      selectAfterCreate: false,
+      tools: [
+        {
+          id: 'inkHighlighter',
+          defaults: { type: PdfAnnotationSubtype.INK, intent: 'FreeHandHighlight', opacity: 0.4 },
+          behavior: { smartLineRecognition: false } as any,
+        },
+        {
+          id: 'ink',
+          behavior: { commitDelay: 0 } as any,
+        },
+        {
+          id: 'lineArrow',
+          defaults: {
+            type: PdfAnnotationSubtype.LINE,
+            intent: 'LineArrow',
+            lineEndings: { start: PdfAnnotationLineEnding.None, end: PdfAnnotationLineEnding.ClosedArrow },
+          },
+        },
+        {
+          id: 'freeText',
+          behavior: { editAfterCreate: true, selectAfterCreate: true },
+        },
+      ],
+    }),
     createPluginRegistration(ZoomPluginPackage),
     createPluginRegistration(ExportPluginPackage, { defaultFileName: 'annotated.pdf' }),
   ], []);
@@ -389,7 +415,7 @@ const TOOL_ENTRIES: { id: Tool; Icon: any; label: string }[] = [
 ];
 
 // ── Document Canvas & Plugins ──
-function DocumentCanvas({
+const DocumentCanvas = React.memo(function DocumentCanvas({
   documentId, tool, penColor, lineWidth, highlighterWidth, filled, safeId, onAskAi, exportFnRef, viewerRef
 }: {
   documentId: string;
@@ -425,13 +451,11 @@ function DocumentCanvas({
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Sync the selected tool to the EmbedPDF annotation provider.
-  // Deselect any selected annotation first so switching tools feels clean.
-  // Lock annotations when a non-select tool is active so strokes are not selectable.
   useEffect(() => {
     const ap = annotationProvidesRef.current;
     if (!ap) return;
     ap.setActiveTool(toolToEmbedId[tool] ?? null);
-  }, [tool]);
+  }, [tool, annotationProvides]);
 
   // Click on the grey viewer background (outside any page) → deselect
   // Skip when clicking on floating menus (Remove / Rotate / context menu)
@@ -458,62 +482,13 @@ function DocumentCanvas({
   const selectedUidsRef = useRef<string[]>([]);
   selectedUidsRef.current = selectedUids;
 
-  // One-time overrides:
-  //   - Disable highlighter smart-line-recognition (auto-correction)
-  //   - Disable pen commitDelay so each stroke is its own annotation
-  useEffect(() => {
-    const ac = annotationCapabilityRef.current;
-    if (!ac) return;
-    ac.addTool({
-      id: 'inkHighlighter',
-      name: 'Highlighter',
-      interaction: { cursor: 'crosshair' },
-      matchScore: () => 0,
-      defaults: { type: PdfAnnotationSubtype.INK, intent: 'FreeHandHighlight', opacity: 0.4 },
-      behavior: { smartLineRecognition: false },
-    } as any);
-    ac.addTool({
-      id: 'ink',
-      name: 'Pen',
-      interaction: { cursor: 'crosshair' },
-      matchScore: () => 0,
-      defaults: { type: PdfAnnotationSubtype.INK },
-      behavior: { commitDelay: 0 },
-    } as any);
-    ac.addTool({
-      id: 'square',
-      name: 'Rectangle',
-      interaction: { cursor: 'crosshair' },
-      matchScore: () => 0,
-      defaults: { type: PdfAnnotationSubtype.SQUARE },
-    } as any);
-    ac.addTool({
-      id: 'circle',
-      name: 'Circle',
-      interaction: { cursor: 'crosshair' },
-      matchScore: () => 0,
-      defaults: { type: PdfAnnotationSubtype.CIRCLE },
-    } as any);
-    ac.addTool({
-      id: 'lineArrow',
-      name: 'Arrow',
-      interaction: { cursor: 'crosshair' },
-      matchScore: () => 0,
-      defaults: {
-        type: PdfAnnotationSubtype.LINE,
-        intent: 'LineArrow',
-        lineEndings: { start: PdfAnnotationLineEnding.None, end: PdfAnnotationLineEnding.ClosedArrow },
-      },
-    } as any);
-    ac.addTool({
-      id: 'freeText',
-      name: 'Text',
-      interaction: { cursor: 'crosshair' },
-      matchScore: () => 0,
-      defaults: { type: PdfAnnotationSubtype.FREETEXT },
-      behavior: { editAfterCreate: true, selectAfterCreate: true },
-    } as any);
-  }, []);
+  // One-time tool overrides are provided via the AnnotationPluginPackage config
+  // (see the `tools` array in `plugins` above). The config does a proper
+  // deep-merge with defaults, preserving the default `transform` patch
+  // functions (e.g. patchInk) required for moving ink/highlighter strokes.
+  // Using `ac.addTool()` would replace the entire tool object and drop
+  // `transform`, which is why pen/highlighter strokes previously would not
+  // follow the selection box during drag.
 
   // When penColor / lineWidth / filled changes:
   //   1. Push new defaults so future strokes use them
@@ -683,26 +658,35 @@ function DocumentCanvas({
     selectionProvides?.clear(documentId);
   }, [contextMenu, onAskAi, selectionProvides, documentId]);
 
+  const renderPage = useCallback((page: { pageIndex: number; width: number; height: number }) => (
+    <PagePointerProvider key={page.pageIndex} documentId={documentId} pageIndex={page.pageIndex}>
+      <div data-page-wrapper style={{
+        position: 'relative', width: page.width, height: page.height,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.3)', margin: '0 auto', background: '#fff',
+      }}>
+        <RenderLayer documentId={documentId} pageIndex={page.pageIndex} style={{ pointerEvents: 'none' }} />
+        <div 
+          className={tool !== 'select' && tool !== 'text' ? 'annotation-layer-locked' : undefined}
+          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+        >
+          <SelectionLayer documentId={documentId} pageIndex={page.pageIndex} />
+          <AnnotationLayer 
+            documentId={documentId} 
+            pageIndex={page.pageIndex} 
+            selectionOutlineColor="#2563EB"
+          />
+        </div>
+      </div>
+    </PagePointerProvider>
+  ), [documentId, tool]);
+
   return (
     <>
-      <style>{`.annotation-layer-locked * { pointer-events: none !important; }`}</style>
+      <style>{`.annotation-layer-locked { pointer-events: none; }`}</style>
       <Viewport documentId={documentId}>
         <Scroller 
           documentId={documentId} 
-          renderPage={(page: { pageIndex: number; width: number; height: number }) => (
-            <PagePointerProvider key={page.pageIndex} documentId={documentId} pageIndex={page.pageIndex}>
-              <div data-page-wrapper style={{
-                position: 'relative', width: page.width, height: page.height,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.3)', margin: '0 auto', background: '#fff',
-              }}>
-                <RenderLayer documentId={documentId} pageIndex={page.pageIndex} style={{ pointerEvents: 'none' }} />
-                <div className={tool !== 'select' && tool !== 'text' ? 'annotation-layer-locked' : undefined}>
-                  <SelectionLayer documentId={documentId} pageIndex={page.pageIndex} />
-                  <AnnotationLayer documentId={documentId} pageIndex={page.pageIndex} selectionOutlineColor="#2563EB" />
-                </div>
-              </div>
-            </PagePointerProvider>
-          )} 
+          renderPage={renderPage} 
         />
       </Viewport>
 
@@ -786,6 +770,6 @@ function DocumentCanvas({
       )}
     </>
   );
-}
+});
 
 export default PdfViewer;
