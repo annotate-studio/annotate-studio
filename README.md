@@ -1,7 +1,7 @@
-<div align="center">
+/home/tahad/Code/annotate-studio/docs/AnnotateStudio-Logo.png<div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="src-tauri/icons/icon.png">
-    <img src="public/logo.png" alt="Annotate Studio logo" width="128" height="128">
+    <img src="src-tauri/icons/128x128.png" alt="Annotate Studio logo" width="128" height="128">
   </picture>
   <h1>Annotate Studio</h1>
 </div>
@@ -10,22 +10,24 @@
   A local-first, AI-powered study environment for the desktop.
 </p>
 
-<div style="display: flex; align-items: center; justify-content: center; width: 100%; gap: 2rem; flex-wrap: wrap; padding: 1rem; box-sizing: border-box;">
-  
-  <div style="flex: 1;">
-    Annotate Studio is a fully offline-capable study workspace that brings together flashcards, exam practice, note-taking, PDF annotation, a Pomodoro timer, and optional AI assistance into a single, integrated desktop application. Every feature works without an internet connection; AI is an opt-in enhancement that you configure with your own provider (local or remote).
-    <br><br>
-    Built as a <strong>hybrid desktop application</strong> using <a href="https://tauri.app">Tauri v2</a> and <a href="https://nextjs.org">Next.js 15</a>, it runs natively on Windows, macOS, and Linux without Electron's resource overhead. The Rust backend handles file I/O, the SM-2 spaced repetition engine, AI provider routing, and data persistence via SQLite, while the React frontend provides the interactive canvas, rich text editing, and study tool UIs.
-  </div>
-  
-  <div style="width: 450px;">
-    <p><em>(Screenshot to be added)</em></p>
-    <p>
-      <a href="#getting-started">Getting Started</a> &middot;
-      <a href="#features">Features</a> &middot;
-      <a href="#tech-stack">Tech Stack</a>
-    </p>
-  </div>
+<div align="center">
+  <table>
+    <tr>
+      <td width="50%" valign="top">
+        Annotate Studio is a fully offline-capable study workspace that brings together flashcards, exam practice, note-taking, PDF annotation, a Pomodoro timer, and optional AI assistance into a single, integrated desktop application. Every feature works without an internet connection; AI is an opt-in enhancement that you configure with your own provider (local or remote).
+        <br><br>
+        Built as a <strong>hybrid desktop application</strong> using <a href="https://tauri.app">Tauri v2</a> and <a href="https://nextjs.org">Next.js 15</a>, it runs natively on Windows, macOS, and Linux without Electron's resource overhead. The Rust backend handles file I/O, the SM-2 spaced repetition engine, AI provider routing, and data persistence via SQLite, while the React frontend provides the interactive canvas, rich text editing, and study tool UIs.
+      </td>
+      <td width="50%" align="center">
+        <p><em>(Screenshot to be added)</em></p>
+        <p>
+          <a href="#getting-started">Getting Started</a> &middot;
+          <a href="#features">Features</a> &middot;
+          <a href="#tech-stack">Tech Stack</a>
+        </p>
+      </td>
+    </tr>
+  </table>
 </div>
 
 ## How It Works
