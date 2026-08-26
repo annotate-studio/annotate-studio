@@ -24,7 +24,7 @@ import { InteractionManagerPluginPackage, PagePointerProvider } from '@embedpdf/
 import {
   Pen, Highlighter, Eraser, MousePointer2,
   Square, Circle, ArrowUp, Download, Type,
-  ZoomIn, ZoomOut, RotateCcw, Sparkles, Sliders, Trash2, RotateCw, Palette,
+  ZoomIn, ZoomOut, RotateCcw, Sparkles, Sliders, Trash2, RotateCw, Palette, Copy,
 } from 'lucide-react';
 import ColorPickerDialog from '@/components/ui/ColorPickerDialog';
 import Select from '@/components/ui/Select';
@@ -449,6 +449,18 @@ const DocumentCanvas = React.memo(function DocumentCanvas({
   
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const lastPointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const { state: zoomState } = useZoom(documentId);
+  const currentScale = zoomState?.currentZoomLevel || 1;
+
+  // Track last pointer position as a fallback anchor for the selection menu
+  useEffect(() => {
+    const el = viewerRef.current;
+    if (!el) return;
+    const handler = (e: PointerEvent) => { lastPointerRef.current = { x: e.clientX, y: e.clientY }; };
+    el.addEventListener('pointerup', handler);
+    return () => el.removeEventListener('pointerup', handler);
+  }, [viewerRef]);
 
   // Sync the selected tool to the EmbedPDF annotation provider.
   useEffect(() => {
@@ -604,14 +616,54 @@ const DocumentCanvas = React.memo(function DocumentCanvas({
           if (!text) return;
 
           const rects = sp.getHighlightRects(documentId);
-          const pageRects = Object.values(rects || {})[0] as any[];
-          
-          if (pageRects && pageRects.length > 0) {
-            const first = pageRects[0];
-            setContextMenu({ x: first.x || 0, y: (first.y || 0) + (first.height || 0) + 4, text });
-          } else {
-            setContextMenu({ x: 0, y: 0, text });
+          const viewerEl = viewerRef.current;
+          if (!viewerEl) {
+            setContextMenu(null);
+            return;
           }
+          // Collect the first selection rect of every page that has one.
+          // embedpdf Rect = { origin: {x,y}, size: {width,height} } in
+          // unscaled PDF page coordinates.
+          const allPageRects: { pageIndex: number; rect: any }[] = [];
+          Object.keys(rects || {}).forEach((pageKey) => {
+            const pageIndex = Number(pageKey);
+            const list = (rects as any)[pageKey] as any[];
+            if (Array.isArray(list) && list.length > 0) {
+              allPageRects.push({ pageIndex, rect: list[0] });
+            }
+          });
+          if (allPageRects.length === 0) {
+            setContextMenu(null);
+            return;
+          }
+          allPageRects.sort((a, b) => a.pageIndex - b.pageIndex);
+          const first = allPageRects[0];
+          const r = first.rect ?? {};
+          const o = r.origin ?? r; // tolerate flat {x,y} shape just in case
+          const s = r.size ?? { width: r.width, height: r.height };
+          const pdfX = (o.x || 0) * currentScale;
+          const pdfY = (o.y || 0) * currentScale;
+          const pdfW = (s.width || 0) * currentScale;
+          const pdfH = (s.height || 0) * currentScale;
+          // Anchor the menu to the live screen position of the page wrapper.
+          // Fixed positioning is immune to nested scroll containers, and the
+          // menu is transient so it does not need to track scrolling.
+          const pageEl = viewerEl.querySelector(`[data-page-index="${first.pageIndex}"]`) as HTMLElement | null;
+          let mx: number;
+          let my: number;
+          if (pageEl) {
+            const pr = pageEl.getBoundingClientRect();
+            mx = pr.left + pdfX;
+            my = pr.top + pdfY + pdfH + 6;
+          } else {
+            // Fallback: place at the last pointer position
+            mx = lastPointerRef.current.x;
+            my = lastPointerRef.current.y + 12;
+          }
+          // Clamp so the menu stays fully on screen (~150x120 estimated)
+          mx = Math.min(Math.max(8, mx), window.innerWidth - 160);
+          my = Math.min(Math.max(8, my), window.innerHeight - 130);
+          setContextMenu({ x: mx, y: my, text });
         } catch { console.warn('[PdfViewer] selection error'); }
       }, 50);
     });
@@ -622,7 +674,7 @@ const DocumentCanvas = React.memo(function DocumentCanvas({
     });
 
     return () => { onEnd(); onChange(); };
-  }, [documentId, tool]);
+  }, [documentId, tool, currentScale]);
 
   // Ctrl+MouseWheel zoom
   useEffect(() => {
@@ -658,9 +710,67 @@ const DocumentCanvas = React.memo(function DocumentCanvas({
     selectionProvides?.clear(documentId);
   }, [contextMenu, onAskAi, selectionProvides, documentId]);
 
+  const copyTextToClipboard = useCallback((text: string) => {
+    if (!text) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {
+          // Fallback for non-secure contexts
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); } catch {}
+          document.body.removeChild(ta);
+        });
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch {}
+        document.body.removeChild(ta);
+      }
+    } catch {}
+  }, []);
+
+  const handleCopy = useCallback(() => {
+    if (!contextMenu) return;
+    copyTextToClipboard(contextMenu.text);
+    setContextMenu(null);
+    selectionProvides?.clear(documentId);
+  }, [contextMenu, copyTextToClipboard, selectionProvides, documentId]);
+
+  // Global Ctrl/Cmd+C inside the viewer → copy current selection to clipboard
+  useEffect(() => {
+    const el = viewerRef.current;
+    if (!el) return;
+    const handler = async (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'c') return;
+      const sp = selectionProvidesRef.current;
+      if (!sp) return;
+      try {
+        const task = sp.getSelectedText(documentId);
+        const rawTexts = typeof (task as any).toPromise === 'function' ? await (task as any).toPromise() : await task;
+        const texts = Array.isArray(rawTexts) ? rawTexts : [String(rawTexts || '')];
+        const text = texts.join('\n').trim();
+        if (!text) return; // let default behavior handle non-PDF text
+        e.preventDefault();
+        e.stopPropagation();
+        copyTextToClipboard(text);
+      } catch {}
+    };
+    el.addEventListener('keydown', handler);
+    return () => el.removeEventListener('keydown', handler);
+  }, [documentId, copyTextToClipboard]);
+
   const renderPage = useCallback((page: { pageIndex: number; width: number; height: number }) => (
     <PagePointerProvider key={page.pageIndex} documentId={documentId} pageIndex={page.pageIndex}>
-      <div data-page-wrapper style={{
+      <div data-page-wrapper data-page-index={page.pageIndex} style={{
         position: 'relative', width: page.width, height: page.height,
         boxShadow: '0 2px 8px rgba(0,0,0,0.3)', margin: '0 auto', background: '#fff',
       }}>
@@ -743,11 +853,20 @@ const DocumentCanvas = React.memo(function DocumentCanvas({
 
       {contextMenu && (
         <div ref={menuRef} data-keep-selection style={{
-          position: 'absolute', left: contextMenu.x, top: contextMenu.y, zIndex: 1000,
+          position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 1000,
           background: 'var(--bg-card)', border: '1px solid var(--border)',
           borderRadius: 'var(--radius-md)', padding: 4, minWidth: 140,
           boxShadow: '0 4px 16px var(--bg-overlay)',
         }}>
+          <button onClick={handleCopy}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+              padding: '6px 12px', fontSize: 12, border: 'none',
+              borderRadius: 'var(--radius-sm)', background: 'transparent',
+              color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+            <Copy size={13} /> Copy
+          </button>
           <button onClick={handleAskAi}
             style={{
               display: 'flex', alignItems: 'center', gap: 6, width: '100%',

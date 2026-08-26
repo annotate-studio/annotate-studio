@@ -4,7 +4,7 @@ import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { Rnd } from 'react-rnd';
 import { Sparkles, X, ChevronDown, ArrowUp, Bot, Maximize2, Minimize2, Plus, Trash2, Edit3, Check, MessageSquare, History, Zap, FileText, BookOpen, Send, ArrowLeft as ArrowLeftIcon, ArrowRight as ArrowRightIcon } from 'lucide-react';
 import { useStore } from '@/lib/store';
-import { aiChat, generateFlashcard, getAIProviders, readFile, readFileBase64 } from '@/lib/tauri-commands';
+import { aiChat, generateFlashcard, getAIProviders, getFlashcardStats, readFile, readFileBase64 } from '@/lib/tauri-commands';
 import MarkdownRenderer from '@/components/canvas/MarkdownRenderer';
 import Dialog from '@/components/ui/Dialog';
 
@@ -304,66 +304,193 @@ After the summary, offer a small continuation menu — such as "go deeper on any
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
 
+  // Flashcard intent: when the user asks the chatbot to create flashcards,
+  // use the same backend API as the Flashcards page (generate_flashcard) so
+  // cards are inserted directly into the requested collection's database.
+  const runFlashcardRequest = useCallback(async (userMsg: string, material: string) => {
+    const state = useStore.getState();
+    const collections = state.flashcardCollections;
+
+    // Resolve target collection: named in the message → active → default
+    let collectionId = state.activeCollectionId ?? undefined;
+    let collectionName = collections.find((c) => c.id === collectionId)?.name || '';
+    for (const c of collections) {
+      const escaped = c.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (new RegExp(`\\b${escaped}\\b`, 'i').test(userMsg)) {
+        collectionId = c.id;
+        collectionName = c.name;
+        break;
+      }
+    }
+    if (!collectionName) collectionName = 'Default';
+
+    addChatMessage({ role: 'user', content: userMsg, timestamp: Date.now() });
+    setChatLoading(true);
+    cancelRef.current = false;
+
+    // No obligation for pre-existing material: fall back to the request itself,
+    // e.g. "make 10 flashcards about photosynthesis" is enough context.
+    const content = material.trim() || userMsg;
+
+    try {
+      const cards = await generateFlashcard(content, undefined, collectionId);
+      if (cancelRef.current) return;
+      // Keep the local store in sync with what was inserted into the DB
+      useStore.setState({ flashcards: [...useStore.getState().flashcards, ...cards] });
+      getFlashcardStats().then((s) => { if (s) useStore.getState().setFlashcardStats(s); }).catch(() => { });
+      addChatMessage({
+        role: 'assistant',
+        content: cards.length > 0
+          ? `Created ${cards.length} flashcard${cards.length > 1 ? 's' : ''} in **${collectionName}**.`
+          : 'The AI returned no flashcards — try rephrasing the topic or providing more detail.',
+        timestamp: Date.now(),
+        flashcardData: cards.length > 0 ? { inserted: cards.length, collectionName } : undefined,
+      });
+    } catch (err) {
+      if (cancelRef.current) return;
+      addChatMessage({ role: 'assistant', content: `Failed to generate flashcards: ${err}`, timestamp: Date.now() });
+    }
+    setChatLoading(false);
+  }, [addChatMessage, setChatLoading]);
+
+  // ── Agent-style persistent study-material attachments ──────────────
+  // Assigned once via @mention, they stay attached (toggleable) across
+  // messages until removed — no need to re-mention them every time.
+
+  interface AttachedDoc {
+    id: string;
+    name: string;
+    path?: string;
+    type: 'pdf' | 'note' | 'image' | 'other';
+    enabled: boolean;
+    cachedContent?: string;
+  }
+
+  const [attachedDocs, setAttachedDocs] = useState<AttachedDoc[]>([]);
+
+  const resolveMention = useCallback((name: string): Omit<AttachedDoc, 'id' | 'enabled'> | null => {
+    const clean = name.replace(/[,.;:!?)\]]+$/, '');
+    const res = resources.find((r) =>
+      r.title === clean || r.title.startsWith(clean) ||
+      (r.filePath && r.filePath.endsWith(clean))
+    );
+    if (res) {
+      return {
+        name: res.title,
+        path: res.filePath,
+        type: res.type === 'pdf' ? 'pdf' : res.type === 'note' ? 'note' : res.type === 'image' ? 'image' : 'other',
+      };
+    }
+    const doc = documents.find((d) =>
+      d.name === clean || d.name.startsWith(clean) || d.path.endsWith(clean)
+    );
+    if (doc) {
+      const ext = doc.name.split('.').pop()?.toLowerCase() || '';
+      return {
+        name: doc.name,
+        path: doc.path,
+        type: ext === 'pdf' ? 'pdf' : ['md', 'markdown'].includes(ext) ? 'note' : ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext) ? 'image' : 'other',
+      };
+    }
+    return null;
+  }, [resources, documents]);
+
+  /** Build a text block for one attachment, extracting/caching PDF content. */
+  const buildAttachmentBlock = useCallback(async (att: AttachedDoc): Promise<string> => {
+    if (att.cachedContent) return att.cachedContent;
+    let block = `[File: ${att.name}]`;
+    try {
+      if (att.type === 'image') {
+        block = `[Attached Image: ${att.name}]`;
+      } else if (att.path) {
+        const ext = att.name.split('.').pop()?.toLowerCase() || '';
+        if (att.type === 'pdf') {
+          const b64 = await readFileBase64(att.path);
+          let pages = '';
+          try { pages = await getPdfPageCount(b64); } catch { }
+          const text = await extractPdfText(b64, 12000);
+          block = hasReadableText(text)
+            ? `[Attached PDF: ${att.name}${pages ? ` (${pages})` : ''}]\n\`\`\`\n${text}\n\`\`\``
+            : `[Attached PDF: ${att.name}${pages ? ` (${pages})` : ''}]`;
+        } else {
+          const content = att.type === 'note'
+            ? (resources.find((r) => r.title === att.name)?.content ?? await readFile(att.path))
+            : await readFile(att.path);
+          block = `[Attached Document: ${att.name}]\n\`\`\`\n${content.slice(0, 4000)}\n\`\`\``;
+        }
+      }
+    } catch {
+      block = `[File: ${att.name} — could not be read]`;
+    }
+    // Cache so subsequent messages don't re-extract
+    setAttachedDocs((prev) => prev.map((a) => (a.id === att.id ? { ...a, cachedContent: block } : a)));
+    return block;
+  }, [resources]);
+
+  const addAttachment = useCallback((doc: Omit<AttachedDoc, 'id' | 'enabled'>) => {
+    let added = false;
+    setAttachedDocs((prev) => {
+      if (prev.some((a) => a.name === doc.name)) return prev;
+      added = true;
+      return [...prev, { ...doc, id: crypto.randomUUID(), enabled: true }];
+    });
+    return added;
+  }, []);
+
+  const toggleAttachment = useCallback((id: string) => {
+    setAttachedDocs((prev) => prev.map((a) => (a.id === id ? { ...a, enabled: !a.enabled } : a)));
+  }, []);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachedDocs((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
   const handleSend = useCallback(async () => {
     const msg = input.trim();
     if (!msg || chatLoading) return;
     setInput('');
-    let displayMsg = msg;
-    let aiMsg = msg;
+    if (inputRef.current) inputRef.current.style.height = 'auto';
+
+    // Resolve @mentions → register as persistent attachments (agent-style).
     const refs = msg.match(/@(\S+)/g) || [];
     for (const ref of refs) {
-      const name = ref.slice(1);
-      // Try canvas resources first (by title or filePath)
-      const res = resources.find((r) => r.title === name || r.title.startsWith(name) || (r.filePath && r.filePath.endsWith(name)));
-      if (res) {
-        if (res.type === 'note' && res.content) {
-          const noteBlock = `[Attached Note: ${res.title}]\n\`\`\`\n${res.content.slice(0, 4000)}\n\`\`\``;
-          displayMsg = displayMsg.replace(ref, noteBlock);
-          aiMsg = aiMsg.replace(ref, noteBlock);
-        } else if (res.filePath) {
-          try {
-            if (res.type === 'pdf') {
-              const b64 = await readFileBase64(res.filePath);
-              const pdfInfo = await getPdfPageCount(b64);
-              displayMsg = displayMsg.replace(ref, `[@${res.title} ${pdfInfo}]`);
-              const pdfText = await extractPdfText(b64, 8000);
-              aiMsg = aiMsg.replace(ref, (pdfText && hasReadableText(pdfText)) ? `[Attached PDF: ${res.title}]\n\`\`\`\n${pdfText}\n\`\`\`` : `[@${res.title} ${pdfInfo}]`);
-            } else {
-              const content = await readFile(res.filePath);
-              const fileBlock = `[Attached File: ${res.title}]\n\`\`\`\n${content.slice(0, 4000)}\n\`\`\``;
-              displayMsg = displayMsg.replace(ref, fileBlock);
-              aiMsg = aiMsg.replace(ref, fileBlock);
-            }
-          } catch {
-            const fallback = `[File: ${res.title}]`;
-            displayMsg = displayMsg.replace(ref, fallback);
-            aiMsg = aiMsg.replace(ref, fallback);
-          }
-        }
-        continue;
-      }
-      // Try documents store
-      const doc = documents.find((d) => d.name === name || d.name.startsWith(name) || d.path.endsWith(name));
-      if (doc) {
-        try {
-          const content = await readFile(doc.path);
-          const docBlock = `[Attached Document: ${doc.name}]\n\`\`\`\n${content.slice(0, 4000)}\n\`\`\``;
-          displayMsg = displayMsg.replace(ref, docBlock);
-          aiMsg = aiMsg.replace(ref, docBlock);
-        } catch {
-          const fallback = `[Document: ${doc.name}]`;
-          displayMsg = displayMsg.replace(ref, fallback);
-          aiMsg = aiMsg.replace(ref, fallback);
-        }
-      }
+      const resolved = resolveMention(ref.slice(1));
+      if (resolved) addAttachment(resolved);
     }
-    addChatMessage({ role: 'user', content: displayMsg, timestamp: Date.now() });
+
+    // Enabled attachments (persistent + any just mentioned)
+    const activeDocs = attachedDocs.filter((a) => a.enabled);
+
+    // Flashcard intent → insert cards via backend instead of a plain chat reply
+    const wantsFlashcards = /\bflash\s?cards?\b/i.test(msg) && /\b(make|create|generate|build|add|insert)\b/i.test(msg);
+    if (wantsFlashcards) {
+      const blocks = await Promise.all(activeDocs.map(buildAttachmentBlock));
+      const history = useStore.getState().chatMessages.slice(-8)
+        .filter((m) => m.role !== 'system')
+        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+        .join('\n\n');
+      const material = [...blocks, history].filter(Boolean).join('\n\n');
+      await runFlashcardRequest(msg, material);
+      return;
+    }
+
+    addChatMessage({ role: 'user', content: msg, timestamp: Date.now() });
     setChatLoading(true);
     cancelRef.current = false;
     try {
-      // Send full conversation history so the AI has context
-      const allMsgs = useStore.getState().chatMessages;
-      const resp = await aiChat(allMsgs.map(m => ({ role: m.role, content: m.content })), 'Custom');
+      // Full conversation history (plain text) + fresh injection of every
+      // enabled attachment's content into the current user message.
+      const history = useStore.getState().chatMessages
+        .map((m) => ({ role: m.role, content: m.content }));
+      history.pop(); // drop the just-added plain copy; we append composed below
+      const blocks = await Promise.all(activeDocs.map(buildAttachmentBlock));
+      const composed = [
+        ...blocks,
+        blocks.length > 0 ? '' : undefined,
+        msg,
+      ].filter(Boolean).join('\n\n');
+      history.push({ role: 'user', content: composed });
+      const resp = await aiChat(history, 'Custom');
       if (cancelRef.current) return;
       addChatMessage({ role: 'assistant', content: resp.content, timestamp: Date.now() });
     } catch (err) {
@@ -371,7 +498,7 @@ After the summary, offer a small continuation menu — such as "go deeper on any
       addChatMessage({ role: 'assistant', content: `Error: ${err}`, timestamp: Date.now() });
     }
     setChatLoading(false);
-  }, [input, chatLoading, addChatMessage, setChatLoading, documents, resources]);
+  }, [input, chatLoading, addChatMessage, setChatLoading, attachedDocs, resolveMention, addAttachment, buildAttachmentBlock, runFlashcardRequest]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (autocompleteOpen) {
@@ -412,8 +539,12 @@ After the summary, offer a small continuation menu — such as "go deeper on any
   }, [autocompletePrefix, docNames]);
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
+    const el = e.target;
+    const val = el.value;
     setInput(val);
+    // Messenger-style auto-grow: start single line, expand with content
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
     const atPos = val.lastIndexOf('@');
     if (atPos >= 0 && (atPos === 0 || val[atPos - 1] === ' ')) {
       const after = val.slice(atPos + 1);
@@ -472,10 +603,11 @@ After the summary, offer a small continuation menu — such as "go deeper on any
 
   const inner = (detached: boolean) => (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg-card)', minHeight: 0 }}>
-      {/* ── Header ───────────────────────────────────── */}
-      <div style={{
+      {/* ── Header (drag handle when detached) ───────── */}
+      <div className="chatbot-header" style={{
         padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6,
         borderBottom: '1px solid var(--border)', flexShrink: 0, minHeight: 40,
+        cursor: detached ? 'grab' : 'default',
       }}>
         <Bot size={16} style={{ color: 'var(--primary)', flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -754,6 +886,19 @@ After the summary, offer a small continuation menu — such as "go deeper on any
                 ) : (
                   <div className="content-selectable" style={{ padding: '10px 14px', userSelect: 'text' }}>
                     <MarkdownRenderer content={msg.content} />
+                    {msg.flashcardData && (
+                      <div style={{
+                        marginTop: 8, display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '8px 12px', borderRadius: 'var(--radius-md)',
+                        background: 'color-mix(in srgb, var(--success) 12%, transparent)',
+                        border: '1px solid var(--success)',
+                      }}>
+                        <Check size={15} style={{ color: 'var(--success)', flexShrink: 0 }} />
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                          {msg.flashcardData.inserted} flashcard{msg.flashcardData.inserted > 1 ? 's' : ''} inserted into “{msg.flashcardData.collectionName}”
+                        </div>
+                      </div>
+                    )}
                     {msg.explainerData && (
                       <div style={{ marginTop: 8, borderTop: '1px solid var(--border-subtle)', paddingTop: 6 }}>
                         <button onClick={() => {
@@ -808,39 +953,40 @@ After the summary, offer a small continuation menu — such as "go deeper on any
               style={{ fontSize: 12, padding: '4px 10px', borderRadius: 'var(--radius-pill)', background: 'var(--primary-light)', color: 'var(--primary)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
               <BookOpen size={12} /> Explain
             </button>
-            <button className="btn btn-ghost" onClick={async () => {
-              const history = useStore.getState().chatMessages;
-              const recent = history.slice(-8).map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n\n');
-              const contextBlock = recent.trim()
-                ? `Recent conversation:\n\n${recent}`
-                : 'There is no conversation history yet, so there is no study content to convert. Tell the user briefly what to do (e.g. paste study material or mention a document with @).';
-              setChatLoading(true);
-              cancelRef.current = false;
-              addChatMessage({ role: 'user', content: 'Generate study flashcards based on recent content', timestamp: Date.now() });
-              try {
-                const resp = await aiChat([
-                  {
-                    role: 'system',
-                    content: `You convert study material into flashcards. When given readable study content, output a numbered list of flashcards in this exact markdown format (one per distinct concept, term, or fact):
-
-1. **Q:** <question or term>
-   **A:** <concise answer or explanation>
-
-Rules:
-- Keep answers concise (1-3 sentences); preserve key terms, numbers, and definitions exactly.
-- Use the language of the content for the answer when it is a translation task.
-- If the content is unreadable, missing, or contains no study material, do NOT invent cards — say so in one sentence and ask the user to paste readable content or reference a document with @.`,
-                  },
-                  { role: 'user', content: `Generate flashcards from the following study content.\n\n${contextBlock}` },
-                ], 'GenerateFlashcard');
-                if (cancelRef.current) return;
-                addChatMessage({ role: 'assistant', content: resp.content, timestamp: Date.now() });
-              } catch (err) { if (cancelRef.current) return; addChatMessage({ role: 'assistant', content: `Error: ${err}`, timestamp: Date.now() }); }
-              setChatLoading(false);
-            }} style={{ fontSize: 12, padding: '4px 10px', borderRadius: 'var(--radius-pill)', background: 'var(--primary-light)', color: 'var(--primary)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Zap size={12} /> Flashcards
-            </button>
           </div>
+
+          {/* ── Attached study materials (persistent, toggleable) ── */}
+          {attachedDocs.length > 0 && (
+            <div style={{ padding: '4px 12px 0', display: 'flex', gap: 4, flexWrap: 'wrap', flexShrink: 0 }}>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)', alignSelf: 'center', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                Context
+              </span>
+              {attachedDocs.map((a) => (
+                <span key={a.id}
+                  onClick={() => toggleAttachment(a.id)}
+                  title={a.enabled ? 'Click to disable for new messages' : 'Click to enable'}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    padding: '2px 6px 2px 8px', borderRadius: 'var(--radius-pill)',
+                    fontSize: 11, cursor: 'pointer', userSelect: 'none',
+                    background: a.enabled ? 'var(--primary-light)' : 'transparent',
+                    border: `1px solid ${a.enabled ? 'var(--primary)' : 'var(--border)'}`,
+                    color: a.enabled ? 'var(--primary)' : 'var(--text-muted)',
+                    opacity: a.enabled ? 1 : 0.55,
+                    maxWidth: 180,
+                  }}>
+                  <FileText size={10} style={{ flexShrink: 0 }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removeAttachment(a.id); }}
+                    title="Remove"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 1, display: 'flex', alignItems: 'center' }}>
+                    <X size={10} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* ── Input ─────────────────────────────────── */}
           <div style={{ padding: '6px 12px 10px', display: 'flex', gap: 6, flexShrink: 0, borderTop: '1px solid var(--border)', position: 'relative' }}>
@@ -872,12 +1018,12 @@ Rules:
             <textarea
               ref={inputRef} value={input} onChange={handleInputChange} onKeyDown={handleKeyDown}
               placeholder="Ask anything... (@ to mention a document)"
-              rows={3}
+              rows={1}
               style={{
-                flex: 1, border: '1px solid transparent', outline: 'none', resize: 'none', padding: '10px 12px',
+                flex: 1, border: '1px solid transparent', outline: 'none', resize: 'none', padding: '9px 12px',
                 borderRadius: 'var(--radius-md)', fontSize: 14, fontFamily: 'inherit',
                 background: 'var(--bg-surface)', color: 'var(--text-primary)', lineHeight: 1.6,
-                maxHeight: 120, transition: 'border-color 0.15s ease',
+                maxHeight: 120, overflowY: 'auto', transition: 'border-color 0.15s ease, height 0.1s ease',
               }}
               onBlur={(e) => { e.currentTarget.style.borderColor = 'transparent'; }}
             />
@@ -978,6 +1124,7 @@ Rules:
         <Rnd
           position={{ x: aiWindowPosition.x, y: aiWindowPosition.y }}
           size={{ width: aiWindowSize.width, height: aiWindowSize.height }}
+          dragHandleClassName="chatbot-header"
           onDragStop={(_e, d) => setAiWindowPosition({ x: d.x, y: d.y })}
           onResizeStop={(_e, _dir, ref, _delta, pos) => {
             setAiWindowSize({ width: parseInt(ref.style.width), height: parseInt(ref.style.height) });

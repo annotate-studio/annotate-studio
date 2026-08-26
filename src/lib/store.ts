@@ -50,6 +50,7 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   explainerData?: { topic: string; steps: string[]; conv: { role: string; content: string }[] };
+  flashcardData?: { inserted: number; collectionName: string };
 }
 
 export interface ChatSession {

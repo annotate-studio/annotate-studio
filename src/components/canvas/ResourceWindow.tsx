@@ -238,7 +238,7 @@ export default React.memo(function ResourceWindow({ resource }: { resource: Reso
             showMaximize
             onAction={(action) => {
               if (action === 'minimize') toggleResourceState(resource.id);
-              else if (action === 'maximize') toggleFullscreen(resource.id);
+              else if (action === 'maximize' || action === 'exitFullscreen') toggleFullscreen(resource.id);
               else if (action === 'close') removeResource(resource.id);
             }}
           />
