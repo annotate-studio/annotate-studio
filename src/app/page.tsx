@@ -8,7 +8,6 @@ import CanvasZone from '@/components/canvas/CanvasZone';
 import ChatbotZone from '@/components/chatbot/ChatbotZone';
 import FlashcardsTab from '@/components/study/FlashcardsTab';
 import ExamsTab from '@/components/study/ExamsTab';
-import DocumentsTab from '@/components/study/DocumentsTab';
 import PomodoroTab from '@/components/study/PomodoroTab';
 import MotivationTab from '@/components/study/MotivationTab';
 import SettingsTab from '@/components/study/SettingsTab';
@@ -25,18 +24,7 @@ export default function Home() {
     loadSettingsFromDisk();
   }, [loadSettingsFromDisk]);
 
-  const renderView = () => {
-    switch (currentView) {
-      case 'canvas': return <CanvasZone />;
-      case 'flashcards': return <FlashcardsTab />;
-      case 'exams': return <ExamsTab />;
-      case 'documents': return <DocumentsTab />;
-      case 'pomodoro': return <PomodoroTab />;
-      case 'motivation': return <MotivationTab />;
-      case 'settings': return <SettingsTab />;
-      default: return <CanvasZone />;
-    }
-  };
+  const isCanvas = currentView === 'canvas';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw' }}>
@@ -44,8 +32,21 @@ export default function Home() {
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <Sidebar />
         <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-          {renderView()}
-          {currentView === 'canvas' && <ChatbotZone />}
+          {/* CanvasZone is ALWAYS mounted to preserve PDF/viewer state */}
+          <div style={{ position: 'absolute', inset: 0, visibility: isCanvas ? 'visible' : 'hidden', pointerEvents: isCanvas ? 'auto' : 'none' }}>
+            <CanvasZone />
+          </div>
+          {/* Other views render on top when active */}
+          {!isCanvas && (
+            <div style={{ position: 'absolute', inset: 0, overflow: 'auto' }}>
+              {currentView === 'flashcards' && <FlashcardsTab />}
+              {currentView === 'exams' && <ExamsTab />}
+              {currentView === 'pomodoro' && <PomodoroTab />}
+              {currentView === 'motivation' && <MotivationTab />}
+              {currentView === 'settings' && <SettingsTab />}
+            </div>
+          )}
+          {isCanvas && <ChatbotZone />}
         </main>
       </div>
     </div>

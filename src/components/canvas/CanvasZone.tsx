@@ -5,6 +5,7 @@ import { Plus, Columns3, Rows3, Minus, LayoutGrid, ZoomIn, ZoomOut, Lock, Unlock
 import { useStore } from '@/lib/store';
 import ResourceWindow from './ResourceWindow';
 import MinimizedShelf from './MinimizedShelf';
+import WorkspaceSwitcher from './WorkspaceSwitcher';
 
 const ZOOM_MIN = 0.15;
 const ZOOM_MAX = 4;
@@ -261,6 +262,7 @@ export default function CanvasZone() {
         height: 44,
       }}>
         <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <WorkspaceSwitcher />
           <button className="btn btn-ghost" onClick={addNewPdf}
             style={{ fontSize: 11, padding: '3px 10px', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: 4 }}>
             <Plus size={12} /> PDF

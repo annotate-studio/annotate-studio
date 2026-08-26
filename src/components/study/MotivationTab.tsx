@@ -123,6 +123,7 @@ export default function MotivationTab() {
 
     try {
       const { aiChat } = await import('@/lib/tauri-commands');
+      
       // Include full conversation history for context (slices off the just-added user message)
       const history = useStore.getState().motivationMessages
         .slice(0, -1)
@@ -308,8 +309,8 @@ export default function MotivationTab() {
         flexShrink: 0,
         flexBasis: motivationChatMaximized ? '100%' : (isSmall ? '100%' : '460px'),
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        width: motivationChatMaximized ? '100%' : (isSmall ? '100%' : 460),
-        maxWidth: motivationChatMaximized ? '100%' : (isSmall ? '100%' : 460),
+        width: motivationChatMaximized ? '100%' : (isSmall ? '100%' : 550),
+        maxWidth: motivationChatMaximized ? '100%' : (isSmall ? '100%' : 550),
         borderRadius: motivationChatMaximized ? 0 : undefined,
         border: motivationChatMaximized ? 'none' : undefined,
       }}>

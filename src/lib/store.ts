@@ -12,7 +12,7 @@ export interface FlashcardCollection {
   reviewPeriodDays: number;
 }
 
-export type ViewMode = 'canvas' | 'flashcards' | 'exams' | 'documents' | 'settings' | 'pomodoro' | 'motivation';
+export type ViewMode = 'canvas' | 'flashcards' | 'exams' | 'settings' | 'pomodoro' | 'motivation';
 export type ThemeMode = 'white' | 'black' | 'sepia' | 'gray' | 'forest' | 'ocean' | 'lavender' | 'rose';
 
 export interface AppSettings {
@@ -70,10 +70,23 @@ export interface ExplainerState {
   generating: boolean;
 }
 
+export interface Workspace {
+  id: string;
+  name: string;
+  resources: Resource[];
+  canvasView: CanvasView;
+}
+
 interface AppState {
   // Navigation
   currentView: ViewMode;
   setView: (view: ViewMode) => void;
+  workspaces: Workspace[];
+  activeWorkspaceId: string;
+  setActiveWorkspace: (id: string) => void;
+  createWorkspace: (name: string) => void;
+  removeWorkspace: (id: string) => void;
+  renameWorkspace: (id: string, name: string) => void;
 
   // Theme & Settings
   theme: ThemeMode;
@@ -352,10 +365,48 @@ export const useStore = create<AppState>((set, get) => ({
   resources: [],
   canvasView: { x: 0, y: 0, zoom: 1 },
   canvasLoaded: false,
+  workspaces: [{ id: 'default', name: 'Default Workspace', resources: [], canvasView: { x: 0, y: 0, zoom: 1 } }],
+  activeWorkspaceId: 'default',
+  setActiveWorkspace: (id) => {
+    const s = get();
+    const updated = s.workspaces.map((w) => w.id === s.activeWorkspaceId ? { ...w, resources: s.resources, canvasView: s.canvasView } : w);
+    const target = updated.find((w) => w.id === id);
+    set({
+      workspaces: updated,
+      activeWorkspaceId: id,
+      resources: target ? [...target.resources] : [],
+      canvasView: target ? { ...target.canvasView } : { x: 0, y: 0, zoom: 1 },
+    });
+    get().saveCanvasToDisk();
+  },
+  createWorkspace: (name) => {
+    const s = get();
+    const updated = s.workspaces.map((w) => w.id === s.activeWorkspaceId ? { ...w, resources: s.resources, canvasView: s.canvasView } : w);
+    const newWs: Workspace = { id: crypto.randomUUID(), name, resources: [], canvasView: { x: 0, y: 0, zoom: 1 } };
+    set({ workspaces: [...updated, newWs], activeWorkspaceId: newWs.id, resources: [], canvasView: { x: 0, y: 0, zoom: 1 } });
+    get().saveCanvasToDisk();
+  },
+  removeWorkspace: (id) => {
+    set((s) => {
+      if (s.workspaces.length <= 1) return s;
+      const filtered = s.workspaces.filter((w) => w.id !== id);
+      const nextActive = s.activeWorkspaceId === id ? filtered[0].id : s.activeWorkspaceId;
+      const target = filtered.find((w) => w.id === nextActive);
+      return { workspaces: filtered, activeWorkspaceId: nextActive, resources: target?.resources || [], canvasView: target?.canvasView || { x: 0, y: 0, zoom: 1 } };
+    });
+    get().saveCanvasToDisk();
+  },
+  renameWorkspace: (id, name) => {
+    set((s) => ({ workspaces: s.workspaces.map((w) => w.id === id ? { ...w, name } : w) }));
+    get().saveCanvasToDisk();
+  },
   setCanvasView: (view) => set({ canvasView: view }),
   setCanvasLoaded: (loaded) => set({ canvasLoaded: loaded }),
   saveCanvasToDisk: () => {
     const s = get();
+    const currentWorkspaces = s.workspaces.map((w) =>
+      w.id === s.activeWorkspaceId ? { ...w, resources: s.resources, canvasView: s.canvasView } : w
+    );
     import('@/lib/tauri-commands').then(async ({ saveCanvasState, loadCanvasState }) => {
       let settings = {};
       try {
@@ -366,8 +417,8 @@ export const useStore = create<AppState>((set, get) => ({
         }
       } catch {}
       saveCanvasState(JSON.stringify({
-        resources: s.resources,
-        view: s.canvasView,
+        workspaces: currentWorkspaces,
+        activeWorkspaceId: s.activeWorkspaceId,
         settings,
       })).catch(() => {});
     });
@@ -386,20 +437,26 @@ export const useStore = create<AppState>((set, get) => ({
         console.log('[loadCanvas] json length:', json?.length);
         if (json && json !== 'null') {
           const data = JSON.parse(json);
-          if (data.resources) {
-          const seen = new Set<string>();
-          update.resources = data.resources.filter((r: Resource) => {
-            if (!r.id || seen.has(r.id)) return false;
-            seen.add(r.id);
-            return true;
-          });
-        }
-          if (data.view) update.canvasView = data.view;
-          console.log('[loadCanvas] resources:', data.resources?.length, 'view:', !!data.view);
+          if (data.workspaces && Array.isArray(data.workspaces) && data.workspaces.length > 0) {
+            const activeId = data.activeWorkspaceId || data.workspaces[0].id;
+            const activeWs = data.workspaces.find((w: Workspace) => w.id === activeId) || data.workspaces[0];
+            update.workspaces = data.workspaces;
+            update.activeWorkspaceId = activeWs.id;
+            update.resources = activeWs.resources || [];
+            update.canvasView = activeWs.canvasView || { x: 0, y: 0, zoom: 1 };
+          } else if (data.resources) {
+            const seen = new Set<string>();
+            const res = data.resources.filter((r: Resource) => { if (!r.id || seen.has(r.id)) return false; seen.add(r.id); return true; });
+            const v = data.view || { x: 0, y: 0, zoom: 1 };
+            update.workspaces = [{ id: 'default', name: 'Default Workspace', resources: res, canvasView: v }];
+            update.activeWorkspaceId = 'default';
+            update.resources = res;
+            update.canvasView = v;
+          }
         }
       } catch (e) { console.error('[loadCanvas] error:', e); }
       set(update);
-      console.log('[loadCanvas] set done, resources:', update.resources?.length);
+      console.log('[loadCanvas] set done, workspaces:', update.workspaces?.length);
       _loadingCanvas = false;
     })();
     return _canvasLoadPromise;
@@ -407,35 +464,51 @@ export const useStore = create<AppState>((set, get) => ({
   addResource: (resource) =>
     set((s) => {
       if (s.resources.some((r) => r.id === resource.id)) return s;
-      return { resources: [...s.resources, resource] };
+      const updated = [...s.resources, resource];
+      const updatedWs = s.workspaces.map((w) => w.id === s.activeWorkspaceId ? { ...w, resources: updated } : w);
+      setTimeout(() => get().saveCanvasToDisk(), 50);
+      return { resources: updated, workspaces: updatedWs };
     }),
   removeResource: (id) =>
-    set((s) => ({ resources: s.resources.filter((r) => r.id !== id) })),
+    set((s) => {
+      const updated = s.resources.filter((r) => r.id !== id);
+      const updatedWs = s.workspaces.map((w) => w.id === s.activeWorkspaceId ? { ...w, resources: updated } : w);
+      setTimeout(() => get().saveCanvasToDisk(), 50);
+      return { resources: updated, workspaces: updatedWs };
+    }),
   toggleResourceState: (id) =>
-    set((s) => ({
-      resources: s.resources.map((r) =>
-        r.id === id
-          ? { ...r, state: r.state === 'maximized' ? 'minimized' : 'maximized' }
-          : r
-      ),
-    })),
+    set((s) => {
+      const updated = s.resources.map((r) =>
+        r.id === id ? { ...r, state: (r.state === 'maximized' ? 'minimized' : 'maximized') as 'maximized' | 'minimized' } : r
+      );
+      const updatedWs = s.workspaces.map((w) => w.id === s.activeWorkspaceId ? { ...w, resources: updated } : w);
+      return { resources: updated, workspaces: updatedWs };
+    }),
   updateResourcePosition: (id, position) =>
-    set((s) => ({
-      resources: s.resources.map((r) =>
+    set((s) => {
+      const updated = s.resources.map((r) =>
         r.id === id ? { ...r, position, isTiled: false } : r
-      ),
-    })),
+      );
+      const updatedWs = s.workspaces.map((w) => w.id === s.activeWorkspaceId ? { ...w, resources: updated } : w);
+      setTimeout(() => get().saveCanvasToDisk(), 50);
+      return { resources: updated, workspaces: updatedWs };
+    }),
   bringToFront: (id) =>
-    set((s) => ({
-      resources: s.resources.map((r) => ({
+    set((s) => {
+      const updated = s.resources.map((r) => ({
         ...r,
         zIndex: r.id === id ? Date.now() : r.zIndex,
-      })),
-    })),
+      }));
+      const updatedWs = s.workspaces.map((w) => w.id === s.activeWorkspaceId ? { ...w, resources: updated } : w);
+      return { resources: updated, workspaces: updatedWs };
+    }),
   updateResourceSize: (id, size) =>
-    set((s) => ({
-      resources: s.resources.map((r) => (r.id === id ? { ...r, size, isTiled: false } : r)),
-    })),
+    set((s) => {
+      const updated = s.resources.map((r) => (r.id === id ? { ...r, size, isTiled: false } : r));
+      const updatedWs = s.workspaces.map((w) => w.id === s.activeWorkspaceId ? { ...w, resources: updated } : w);
+      setTimeout(() => get().saveCanvasToDisk(), 50);
+      return { resources: updated, workspaces: updatedWs };
+    }),
   arrangeResources: (layout) =>
     set((s) => {
       const all = s.resources.filter((r) => r.state === 'maximized');
@@ -463,32 +536,34 @@ export const useStore = create<AppState>((set, get) => ({
       return { resources: s.resources.map((r) => arranged.find((a) => a.id === r.id) || r) };
     }),
   updateResourceContent: (id, content) =>
-    set((s) => ({
-      resources: s.resources.map((r) => (r.id === id ? { ...r, content } : r)),
-    })),
+    set((s) => {
+      const updated = s.resources.map((r) => (r.id === id ? { ...r, content } : r));
+      const updatedWs = s.workspaces.map((w) => w.id === s.activeWorkspaceId ? { ...w, resources: updated } : w);
+      setTimeout(() => get().saveCanvasToDisk(), 100);
+      return { resources: updated, workspaces: updatedWs };
+    }),
   toggleFullscreen: (id) =>
     set((s) => {
       const r = s.resources.find((r) => r.id === id);
       if (!r) return {};
+      let updated: Resource[];
       if (r.isFullscreen) {
         const prev = r.previousBounds || { x: 60, y: 60, width: 600, height: 500 };
-        return {
-          resources: s.resources.map((res) =>
-            res.id === id
-              ? { ...res, isFullscreen: false, isTiled: false, previousBounds: undefined, position: { x: prev.x, y: prev.y }, size: { width: prev.width, height: prev.height } }
-              : res
-          ),
-        };
+        updated = s.resources.map((res) =>
+          res.id === id
+            ? { ...res, isFullscreen: false, isTiled: false, previousBounds: undefined, position: { x: prev.x, y: prev.y }, size: { width: prev.width, height: prev.height } }
+            : res
+        );
       } else {
         const headerH = 44;
-        return {
-          resources: s.resources.map((res) =>
-            res.id === id
-              ? { ...res, isFullscreen: true, previousBounds: { x: res.position.x, y: res.position.y, width: res.size?.width || 600, height: res.size?.height || 500 }, position: { x: 0, y: headerH }, size: { width: window.innerWidth - 64, height: window.innerHeight - headerH } }
-              : res
-          ),
-        };
+        updated = s.resources.map((res) =>
+          res.id === id
+            ? { ...res, isFullscreen: true, previousBounds: { x: res.position.x, y: res.position.y, width: res.size?.width || 600, height: res.size?.height || 500 }, position: { x: 0, y: headerH }, size: { width: window.innerWidth - 64, height: window.innerHeight - headerH } }
+            : res
+        );
       }
+      const updatedWs = s.workspaces.map((w) => w.id === s.activeWorkspaceId ? { ...w, resources: updated } : w);
+      return { resources: updated, workspaces: updatedWs };
     }),
   minimizeAllResources: () =>
     set((s) => ({

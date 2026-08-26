@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { Bold, Italic, Heading, Code, List, Link, Eye } from 'lucide-react';
+import { Bold, Italic, Heading, Code, List } from 'lucide-react';
 import { getAllFiles } from '@/lib/tauri-commands';
 import type { StudyFile } from '@/lib/tauri-commands';
 
@@ -105,7 +105,6 @@ export default function WikiInput({ value, onChange, placeholder, style }: WikiI
     { icon: <Heading size={13} />, title: 'Heading', action: () => insert('## ', '') },
     { icon: <Code size={13} />, title: 'Code', action: () => insert('`', '`') },
     { icon: <List size={13} />, title: 'List', action: () => insert('- ', '') },
-    { icon: <Link size={13} />, title: 'Link', action: () => insert('[', '](url)') },
   ];
 
   return (

@@ -74,10 +74,19 @@ function ResourceContent({ resource }: { resource: Resource }) {
   if (resource.type === 'pdf') {
     if (!blobUrl) {
       return (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-          <div style={{ textAlign: 'center' }}>
-            <FileText size={32} style={{ opacity: 0.3, margin: '0 auto 12px' }} />
-            <div style={{ fontSize: 12 }}>Loading PDF...</div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 16, gap: 10, overflow: 'hidden', background: 'var(--bg-app)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 'var(--radius-sm)', background: 'var(--bg-elevated)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ height: 10, width: '60%', borderRadius: 4, background: 'var(--bg-elevated)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+              <div style={{ height: 8, width: '30%', borderRadius: 4, background: 'var(--bg-elevated)', marginTop: 6, animation: 'pulse 1.5s ease-in-out infinite 0.2s' }} />
+            </div>
+          </div>
+          <div style={{ flex: 1, borderRadius: 'var(--radius-md)', background: 'var(--bg-elevated)', animation: 'pulse 1.5s ease-in-out infinite 0.1s', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+              <FileText size={32} style={{ opacity: 0.2, margin: '0 auto 8px' }} />
+              <div style={{ fontSize: 12, fontWeight: 500 }}>Loading PDF...</div>
+            </div>
           </div>
         </div>
       );
@@ -92,8 +101,8 @@ function ResourceContent({ resource }: { resource: Resource }) {
   if (resource.type === 'image') {
     if (!blobUrl) {
       return (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-          <div style={{ textAlign: 'center' }}><div style={{ fontSize: 12 }}>Loading image...</div></div>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-app)' }}>
+          <div style={{ width: 80, height: 80, borderRadius: 'var(--radius-md)', background: 'var(--bg-elevated)', animation: 'pulse 1.5s ease-in-out infinite' }} />
         </div>
       );
     }
@@ -138,19 +147,7 @@ export default React.memo(function ResourceWindow({ resource }: { resource: Reso
   const h = resource.size?.height || 500;
 
   const [noteContent, setNoteContent] = useState(resource.content || '');
-  const [notesList, setNotesList] = useState<{ id: string; name: string }[]>([]);
-  const [showFileTree, setShowFileTree] = useState(false);
   const [showPreview, setShowPreview] = useState(true);
-
-  useEffect(() => {
-    if (resource.type === 'note') {
-      getAllFiles().then((files) => {
-        setNotesList(
-          files.filter((f) => f.file_type === 'Markdown').map((f) => ({ id: f.id, name: f.name }))
-        );
-      }).catch(() => { });
-    }
-  }, [resource.type]);
 
   useEffect(() => {
     setNoteContent(resource.content || '');
@@ -245,7 +242,7 @@ export default React.memo(function ResourceWindow({ resource }: { resource: Reso
         </div>
 
         {/* Content */}
-        {resource.type === 'note' && <NoteContent noteContent={noteContent} setNoteContent={setNoteContent} showFileTree={showFileTree} setShowFileTree={setShowFileTree} showPreview={showPreview} setShowPreview={setShowPreview} notesList={notesList} openNoteFile={openNoteFile} handleSummarize={handleSummarize} />}
+        {resource.type === 'note' && <NoteContent noteContent={noteContent} setNoteContent={setNoteContent} showPreview={showPreview} setShowPreview={setShowPreview} handleSummarize={handleSummarize} />}
         {(resource.type === 'pdf' || resource.type === 'image') && <ResourceContent resource={resource} />}
       </div>
     );
@@ -307,74 +304,43 @@ export default React.memo(function ResourceWindow({ resource }: { resource: Reso
             <Sparkles size={12} /> Summarize
           </button>
         )}
-        <TrafficLights
-          showMaximize
-          onAction={(action) => {
-            if (action === 'minimize') toggleResourceState(resource.id);
-            else if (action === 'maximize') toggleFullscreen(resource.id);
-            else if (action === 'close') removeResource(resource.id);
-          }}
-        />
-      </div>
+          <TrafficLights
+            showMaximize
+            onAction={(action) => {
+              if (action === 'minimize') toggleResourceState(resource.id);
+              else if (action === 'maximize' || action === 'exitFullscreen') toggleFullscreen(resource.id);
+              else if (action === 'close') removeResource(resource.id);
+            }}
+          />
+        </div>
 
-      {/* Content */}
-      {resource.type === 'note' && <NoteContent noteContent={noteContent} setNoteContent={setNoteContent} showFileTree={showFileTree} setShowFileTree={setShowFileTree} showPreview={showPreview} setShowPreview={setShowPreview} notesList={notesList} openNoteFile={openNoteFile} handleSummarize={handleSummarize} />}
-      {(resource.type === 'pdf' || resource.type === 'image') && <ResourceContent resource={resource} />}
-    </Rnd>
-  );
-}, (prev, next) => resourceEqual(prev.resource, next.resource)); // ResourceWindow
+        {/* Content */}
+        {resource.type === 'note' && <NoteContent noteContent={noteContent} setNoteContent={setNoteContent} showPreview={showPreview} setShowPreview={setShowPreview} handleSummarize={handleSummarize} />}
+        {(resource.type === 'pdf' || resource.type === 'image') && <ResourceContent resource={resource} />}
+      </Rnd>
+    );
+  }, (prev, next) => resourceEqual(prev.resource, next.resource)); // ResourceWindow
 
 
 // ── Extracted NoteContent to avoid duplication ──────────────────────
 
 function NoteContent({
   noteContent, setNoteContent,
-  showFileTree, setShowFileTree,
   showPreview, setShowPreview,
-  notesList, openNoteFile, handleSummarize,
+  handleSummarize,
 }: {
   noteContent: string; setNoteContent: (v: string) => void;
-  showFileTree: boolean; setShowFileTree: (v: boolean) => void;
   showPreview: boolean; setShowPreview: (v: boolean) => void;
-  notesList: { id: string; name: string }[];
-  openNoteFile: (name: string) => Promise<void>;
   handleSummarize: () => void;
 }) {
   return (
     <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-      {showFileTree && (
-        <div style={{
-          width: 180, borderRight: '1px solid var(--border)', overflow: 'auto', flexShrink: 0,
-          padding: '6px 0', background: 'var(--bg-surface)',
-        }}>
-          <div style={{ padding: '6px 12px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>
-            Notes
-          </div>
-          {notesList.map((n, index) => (
-            <div key={`${n.id}-${index}`}
-              onClick={() => openNoteFile(n.name)}
-              style={{
-                padding: '5px 12px', cursor: 'pointer', fontSize: 12, color: 'var(--text-secondary)',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
-              <FileText size={12} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.name}</span>
-            </div>
-          ))}
-        </div>
-      )}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{
             padding: '4px 12px', borderBottom: '1px solid var(--border)',
             display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0,
           }}>
-            <button className="btn btn-ghost" onClick={() => setShowFileTree(!showFileTree)}
-              style={{ padding: '3px 8px', fontSize: 11, borderRadius: 'var(--radius-sm)' }}>
-              <FileText size={12} /> {showFileTree ? 'Hide Files' : 'Files'}
-            </button>
             <div style={{ flex: 1 }} />
             <button className="btn btn-ghost" onClick={() => setShowPreview(!showPreview)}
               style={{ padding: '3px 8px', fontSize: 11, borderRadius: 'var(--radius-sm)' }}>

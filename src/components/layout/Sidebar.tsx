@@ -1,11 +1,10 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import {
   LayoutGrid,
   NotebookText,
   ScrollText,
-  FileText,
   Timer,
   Heart,
   Settings,
@@ -13,7 +12,6 @@ import {
   Menu,
 } from 'lucide-react';
 import { useStore, type ViewMode } from '@/lib/store';
-import { getAllFiles } from '@/lib/tauri-commands';
 
 interface NavItem {
   icon: React.ReactNode;
@@ -25,27 +23,17 @@ interface NavItem {
 export default function Sidebar() {
   const {
     currentView, setView, sidebarExpanded, toggleSidebar,
-    flashcardStats, theme, notesList, setNotesList,
+    flashcardStats,
   } = useStore();
 
   const NAV_ITEMS: NavItem[] = [
     { icon: <LayoutGrid size={sidebarExpanded ? 18 : 20} />, label: 'Canvas', view: 'canvas' },
     { icon: <NotebookText size={sidebarExpanded ? 18 : 20} />, label: 'Flashcards', view: 'flashcards', badge: flashcardStats?.due },
     { icon: <ScrollText size={sidebarExpanded ? 18 : 20} />, label: 'Exams', view: 'exams' },
-    { icon: <FileText size={sidebarExpanded ? 18 : 20} />, label: 'Documents', view: 'documents' },
     { icon: <Timer size={sidebarExpanded ? 18 : 20} />, label: 'Pomodoro', view: 'pomodoro' },
     { icon: <Heart size={sidebarExpanded ? 18 : 20} />, label: 'Motivation', view: 'motivation' },
     { icon: <Settings size={sidebarExpanded ? 18 : 20} />, label: 'Settings', view: 'settings' },
   ];
-
-  // Load file listing when sidebar expands
-  useEffect(() => {
-    if (sidebarExpanded) {
-      getAllFiles()
-        .then((files) => setNotesList(files.filter((f) => f.file_type === 'Markdown')))
-        .catch(() => { });
-    }
-  }, [sidebarExpanded, setNotesList]);
 
   return (
     <nav
