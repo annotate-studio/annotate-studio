@@ -103,9 +103,10 @@ export async function readNote(name: string): Promise<string> {
 export async function aiChat(
   messages: ChatMessage[],
   taskType: TaskType,
-  context?: string
+  context?: string,
+  model?: string
 ): Promise<AIResponse> {
-  return invoke('ai_chat', { messages, taskType, context });
+  return invoke('ai_chat', { messages, taskType, context, model });
 }
 
 export async function aiExplain(content: string, subject?: string): Promise<AIResponse> {

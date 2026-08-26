@@ -101,6 +101,7 @@ export default function ChatbotZone() {
     documents, resources,
   } = useStore();
 
+  const [errorDialogMsg, setErrorDialogMsg] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
@@ -183,10 +184,13 @@ After the summary, offer a small continuation menu — such as "go deeper on any
     setExplainerStep(0);
     setExplainerConv([]);
     try {
+      const activeDocs = attachedDocs.filter((a) => a.enabled);
+      const blocks = await Promise.all(activeDocs.map(buildAttachmentBlock));
+      const material = blocks.length > 0 ? `Context Materials:\n${blocks.join('\n\n')}\n\n` : '';
       const resp = await aiChat([
         { role: 'system', content: explainerSystem },
-        { role: 'user', content: `Explain this topic in a step-by-step manner: ${topic}` },
-      ], 'Explain');
+        { role: 'user', content: `${material}Explain this topic in a step-by-step manner: ${topic}` },
+      ], 'Explain', undefined, selectedModel || undefined);
       if (cancelRef.current) return;
       const parts = resp.content.split(/(?=## Step \d+:)/);
       const parsed: string[] = [];
@@ -206,9 +210,10 @@ After the summary, offer a small continuation menu — such as "go deeper on any
         timestamp: Date.now(),
         explainerData: { topic, steps: parsed, conv: [] },
       });
-    } catch {
+    } catch (err) {
       if (cancelRef.current) return;
-      setExplainerConv([{ role: 'assistant', content: 'Failed to generate explanation. Please try again.' }]);
+      setErrorDialogMsg(String(err));
+      setExplainerActive(false);
     }
     setExplainerLoading(false);
   };
@@ -220,17 +225,20 @@ After the summary, offer a small continuation menu — such as "go deeper on any
     setExplainerConv((prev) => [...prev, { role: 'user', content: question }]);
     setExplainerLoading(true);
     try {
+      const activeDocs = attachedDocs.filter((a) => a.enabled);
+      const blocks = await Promise.all(activeDocs.map(buildAttachmentBlock));
+      const material = blocks.length > 0 ? `Context Materials:\n${blocks.join('\n\n')}\n\n` : '';
       const stepContext = explainerSteps[explainerStep] || '';
       const resp = await aiChat([
-        { role: 'system', content: `You are explaining "${explainerTopic}". The user is currently on this step:\n\n${stepContext}\n\nAnswer their question concisely and helpfully, relating it to the current step.` },
+        { role: 'system', content: `${material}You are explaining "${explainerTopic}". The user is currently on this step:\n\n${stepContext}\n\nAnswer their question concisely and helpfully, relating it to the current step.` },
         ...explainerConv.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
         { role: 'user', content: question },
-      ], 'Explain');
+      ], 'Explain', undefined, selectedModel || undefined);
       if (cancelRef.current) return;
       setExplainerConv((prev) => [...prev, { role: 'assistant', content: resp.content }]);
-    } catch {
+    } catch (err) {
       if (cancelRef.current) return;
-      setExplainerConv((prev) => [...prev, { role: 'assistant', content: 'Sorry, I had trouble answering that.' }]);
+      setErrorDialogMsg(String(err));
     }
     setExplainerLoading(false);
   };
@@ -292,10 +300,10 @@ After the summary, offer a small continuation menu — such as "go deeper on any
         const resp = await aiChat([
           { role: 'system', content: 'You are a study assistant. Summarize the following document concisely, highlighting key concepts, important details, and connections to related topics.' },
           { role: 'user', content: `Title: ${title}\n\n${summaryContent}` },
-        ], 'Summarize');
+        ], 'Summarize', undefined, selectedModel || undefined);
         addChatMessage({ role: 'assistant', content: resp.content, timestamp: Date.now() });
       } catch (err) {
-        addChatMessage({ role: 'assistant', content: `Error: ${err}`, timestamp: Date.now() });
+        setErrorDialogMsg(String(err));
       }
       setChatLoading(false);
     };
@@ -348,7 +356,7 @@ After the summary, offer a small continuation menu — such as "go deeper on any
       });
     } catch (err) {
       if (cancelRef.current) return;
-      addChatMessage({ role: 'assistant', content: `Failed to generate flashcards: ${err}`, timestamp: Date.now() });
+      setErrorDialogMsg(String(err));
     }
     setChatLoading(false);
   }, [addChatMessage, setChatLoading]);
@@ -402,30 +410,54 @@ After the summary, offer a small continuation menu — such as "go deeper on any
     try {
       if (att.type === 'image') {
         block = `[Attached Image: ${att.name}]`;
-      } else if (att.path) {
-        const ext = att.name.split('.').pop()?.toLowerCase() || '';
-        if (att.type === 'pdf') {
-          const b64 = await readFileBase64(att.path);
-          let pages = '';
-          try { pages = await getPdfPageCount(b64); } catch { }
-          const text = await extractPdfText(b64, 12000);
-          block = hasReadableText(text)
-            ? `[Attached PDF: ${att.name}${pages ? ` (${pages})` : ''}]\n\`\`\`\n${text}\n\`\`\``
-            : `[Attached PDF: ${att.name}${pages ? ` (${pages})` : ''}]`;
+      } else {
+        const pathsToTry: string[] = [];
+        if (att.path) {
+          pathsToTry.push(att.path);
+          if (!att.path.startsWith('documents/') && !att.path.startsWith('notes/')) {
+            pathsToTry.push(`documents/${att.path}`, `notes/${att.path}`);
+          }
+        }
+        pathsToTry.push(`documents/${att.name}`, `notes/${att.name}`, att.name);
+
+        let fileContent = '';
+        let b64Data = '';
+
+        for (const p of pathsToTry) {
+          if (!p) continue;
+          try {
+            if (att.type === 'pdf' || att.name.toLowerCase().endsWith('.pdf')) {
+              b64Data = await readFileBase64(p);
+              if (b64Data) break;
+            } else {
+              fileContent = await readFile(p);
+              if (fileContent) break;
+            }
+          } catch {}
+        }
+
+        if (att.type === 'pdf' || att.name.toLowerCase().endsWith('.pdf')) {
+          if (b64Data) {
+            let pages = '';
+            try { pages = await getPdfPageCount(b64Data); } catch {}
+            let text = '';
+            try { text = await extractPdfText(b64Data, 16000); } catch {}
+            block = `[Attached PDF: ${att.name}${pages ? ` (${pages})` : ''}]\n\`\`\`\n${text || '(PDF text extraction empty)'}\n\`\`\``;
+          } else {
+            block = `[Attached PDF: ${att.name} — file could not be found or read from disk]`;
+          }
+        } else if (fileContent) {
+          block = `[Attached Document: ${att.name}]\n\`\`\`\n${fileContent.slice(0, 10000)}\n\`\`\``;
         } else {
-          const content = att.type === 'note'
-            ? (resources.find((r) => r.title === att.name)?.content ?? await readFile(att.path))
-            : await readFile(att.path);
-          block = `[Attached Document: ${att.name}]\n\`\`\`\n${content.slice(0, 4000)}\n\`\`\``;
+          block = `[File: ${att.name} — could not be read]`;
         }
       }
-    } catch {
-      block = `[File: ${att.name} — could not be read]`;
+    } catch (err) {
+      block = `[File: ${att.name} — error: ${err}]`;
     }
-    // Cache so subsequent messages don't re-extract
     setAttachedDocs((prev) => prev.map((a) => (a.id === att.id ? { ...a, cachedContent: block } : a)));
     return block;
-  }, [resources]);
+  }, []);
 
   const addAttachment = useCallback((doc: Omit<AttachedDoc, 'id' | 'enabled'>) => {
     let added = false;
@@ -490,12 +522,12 @@ After the summary, offer a small continuation menu — such as "go deeper on any
         msg,
       ].filter(Boolean).join('\n\n');
       history.push({ role: 'user', content: composed });
-      const resp = await aiChat(history, 'Custom');
+      const resp = await aiChat(history, 'Custom', undefined, selectedModel || undefined);
       if (cancelRef.current) return;
       addChatMessage({ role: 'assistant', content: resp.content, timestamp: Date.now() });
     } catch (err) {
       if (cancelRef.current) return;
-      addChatMessage({ role: 'assistant', content: `Error: ${err}`, timestamp: Date.now() });
+      setErrorDialogMsg(String(err));
     }
     setChatLoading(false);
   }, [input, chatLoading, addChatMessage, setChatLoading, attachedDocs, resolveMention, addAttachment, buildAttachmentBlock, runFlashcardRequest]);
@@ -939,8 +971,11 @@ After the summary, offer a small continuation menu — such as "go deeper on any
             <div ref={messagesEndRef} />
           </div>
 
-          {/* ── Quick actions ─────────────────────────── */}
-          <div style={{ padding: '0 12px 4px', display: 'flex', gap: 4, flexShrink: 0 }}>
+          {/* ── Quick actions & Attached study materials in a single row ── */}
+          <div style={{
+            padding: '4px 12px 8px', display: 'flex', gap: 6, alignItems: 'center',
+            overflowX: 'auto', flexShrink: 0, scrollbarWidth: 'none',
+          }}>
             <button className="btn btn-ghost" onClick={() => {
               if (input.trim()) {
                 const topic = input.trim();
@@ -950,43 +985,45 @@ After the summary, offer a small continuation menu — such as "go deeper on any
                 setExplainerActive(true);
               }
             }}
-              style={{ fontSize: 12, padding: '4px 10px', borderRadius: 'var(--radius-pill)', background: 'var(--primary-light)', color: 'var(--primary)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <BookOpen size={12} /> Explain
+              style={{
+                fontSize: 12, padding: '5px 12px', borderRadius: 'var(--radius-pill)',
+                background: 'var(--primary-light)', color: 'var(--primary)',
+                border: '1px solid color-mix(in srgb, var(--primary) 30%, transparent)',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+                fontWeight: 500,
+              }}>
+              <BookOpen size={13} /> Explain
             </button>
-          </div>
 
-          {/* ── Attached study materials (persistent, toggleable) ── */}
-          {attachedDocs.length > 0 && (
-            <div style={{ padding: '4px 12px 0', display: 'flex', gap: 4, flexWrap: 'wrap', flexShrink: 0 }}>
-              <span style={{ fontSize: 10, color: 'var(--text-muted)', alignSelf: 'center', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                Context
-              </span>
-              {attachedDocs.map((a) => (
-                <span key={a.id}
-                  onClick={() => toggleAttachment(a.id)}
-                  title={a.enabled ? 'Click to disable for new messages' : 'Click to enable'}
+            {attachedDocs.map((a) => (
+              <span key={a.id}
+                onClick={() => toggleAttachment(a.id)}
+                title={a.enabled ? 'Click to disable for new messages' : 'Click to enable'}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '4px 10px 4px 12px', borderRadius: 'var(--radius-pill)',
+                  fontSize: 12, cursor: 'pointer', userSelect: 'none', flexShrink: 0,
+                  background: a.enabled ? 'var(--primary-light)' : 'var(--bg-surface)',
+                  border: `1px solid ${a.enabled ? 'var(--primary)' : 'var(--border)'}`,
+                  color: a.enabled ? 'var(--primary)' : 'var(--text-secondary)',
+                  opacity: a.enabled ? 1 : 0.6,
+                  fontWeight: 500,
+                }}>
+                <FileText size={13} style={{ flexShrink: 0 }} />
+                <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); removeAttachment(a.id); }}
+                  title="Remove"
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 4,
-                    padding: '2px 6px 2px 8px', borderRadius: 'var(--radius-pill)',
-                    fontSize: 11, cursor: 'pointer', userSelect: 'none',
-                    background: a.enabled ? 'var(--primary-light)' : 'transparent',
-                    border: `1px solid ${a.enabled ? 'var(--primary)' : 'var(--border)'}`,
-                    color: a.enabled ? 'var(--primary)' : 'var(--text-muted)',
-                    opacity: a.enabled ? 1 : 0.55,
-                    maxWidth: 180,
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'inherit', padding: 2, display: 'flex', alignItems: 'center',
+                    opacity: 0.8,
                   }}>
-                  <FileText size={10} style={{ flexShrink: 0 }} />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); removeAttachment(a.id); }}
-                    title="Remove"
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 1, display: 'flex', alignItems: 'center' }}>
-                    <X size={10} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
 
           {/* ── Input ─────────────────────────────────── */}
           <div style={{ padding: '6px 12px 10px', display: 'flex', gap: 6, flexShrink: 0, borderTop: '1px solid var(--border)', position: 'relative' }}>
@@ -1118,6 +1155,21 @@ After the summary, offer a small continuation menu — such as "go deeper on any
     </Dialog>
   );
 
+  const errorDialog = (
+    <Dialog open={Boolean(errorDialogMsg)} onClose={() => setErrorDialogMsg(null)} title="AI Error" width={380}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ fontSize: 13, color: 'var(--danger)', lineHeight: 1.6, wordBreak: 'break-word' }}>
+          {errorDialogMsg}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn btn-primary" onClick={() => setErrorDialogMsg(null)} style={{ fontSize: 12, padding: '6px 14px' }}>
+            OK
+          </button>
+        </div>
+      </div>
+    </Dialog>
+  );
+
   if (aiDetached) {
     return (
       <>
@@ -1140,6 +1192,7 @@ After the summary, offer a small continuation menu — such as "go deeper on any
         </Rnd>
         {sessionDialog}
         {renameDialog}
+        {errorDialog}
       </>
     );
   }
@@ -1174,6 +1227,7 @@ After the summary, offer a small continuation menu — such as "go deeper on any
       </div>
       {sessionDialog}
       {renameDialog}
+      {errorDialog}
     </>
   );
 }
