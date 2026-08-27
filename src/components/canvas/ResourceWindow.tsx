@@ -18,7 +18,7 @@ const resourceDotColors: Record<string, string> = { pdf: 'var(--danger)', note: 
 function ResourceContent({ resource }: { resource: Resource }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const setChatbotOpen = useStore((s) => s.setChatbotOpen);
-  const setSummarizeTarget = useStore((s) => s.setSummarizeTarget);
+  const setChatInputDraft = useStore((s) => s.setChatInputDraft);
   const blobUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -65,11 +65,8 @@ function ResourceContent({ resource }: { resource: Resource }) {
 
   const handleAskAi = useCallback((text?: string) => {
     setChatbotOpen(true);
-    setSummarizeTarget({
-      content: text || resource.filePath || resource.id,
-      title: resource.title,
-    });
-  }, [resource.id, resource.filePath, resource.title, setChatbotOpen, setSummarizeTarget]);
+    setChatInputDraft(text || '');
+  }, [resource.id, setChatbotOpen, setChatInputDraft]);
 
   if (resource.type === 'pdf') {
     if (!blobUrl) {
@@ -138,7 +135,7 @@ export default React.memo(function ResourceWindow({ resource }: { resource: Reso
   const toggleFullscreen = useStore((s) => s.toggleFullscreen);
   const saveCanvasToDisk = useStore((s) => s.saveCanvasToDisk);
   const setChatbotOpen = useStore((s) => s.setChatbotOpen);
-  const setSummarizeTarget = useStore((s) => s.setSummarizeTarget);
+  const setChatInputDraft = useStore((s) => s.setChatInputDraft);
   const bringToFront = useStore((s) => s.bringToFront);
 
   const isSelected = selectedResourceId === resource.id;
@@ -185,12 +182,9 @@ export default React.memo(function ResourceWindow({ resource }: { resource: Reso
   }, [resource.id, setSelectedResource]);
 
   const handleSummarize = useCallback(() => {
-    setSummarizeTarget({
-      content: noteContent || resource.content || resource.filePath || '',
-      title: resource.title,
-    });
+    setChatInputDraft(`Summarize this:\n\n${noteContent || resource.content || resource.filePath || ''}`);
     setChatbotOpen(true);
-  }, [noteContent, resource, setChatbotOpen, setSummarizeTarget]);
+  }, [noteContent, resource, setChatbotOpen, setChatInputDraft]);
 
   const openNoteFile = useCallback(async (name: string) => {
     try {

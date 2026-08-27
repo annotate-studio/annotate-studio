@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import ColorPickerDialog from '@/components/ui/ColorPickerDialog';
 import Select from '@/components/ui/Select';
+import { useStore } from '@/lib/store';
 
 export type Tool = 'select' | 'pen' | 'highlighter' | 'eraser' | 'rectangle' | 'circle' | 'arrow' | 'text';
 
@@ -617,52 +618,68 @@ const DocumentCanvas = React.memo(function DocumentCanvas({
 
           const rects = sp.getHighlightRects(documentId);
           const viewerEl = viewerRef.current;
-          if (!viewerEl) {
-            setContextMenu(null);
-            return;
-          }
-          // Collect the first selection rect of every page that has one.
-          // embedpdf Rect = { origin: {x,y}, size: {width,height} } in
-          // unscaled PDF page coordinates.
-          const allPageRects: { pageIndex: number; rect: any }[] = [];
-          Object.keys(rects || {}).forEach((pageKey) => {
-            const pageIndex = Number(pageKey);
-            const list = (rects as any)[pageKey] as any[];
+          if (!rects || !viewerEl) { setContextMenu(null); return; }
+
+          // Find the first page that has selection rects
+          let firstPageIndex = -1;
+          for (const [pageKey, list] of Object.entries(rects)) {
             if (Array.isArray(list) && list.length > 0) {
-              allPageRects.push({ pageIndex, rect: list[0] });
+              firstPageIndex = Number(pageKey);
+              break;
             }
-          });
-          if (allPageRects.length === 0) {
-            setContextMenu(null);
+          }
+          if (firstPageIndex < 0) { setContextMenu(null); return; }
+
+          // Use the page wrapper's bounding rect to convert PDF coords to viewport
+          const pageEl = viewerEl.querySelector(`[data-page-index="${firstPageIndex}"]`) as HTMLElement | null;
+          if (!pageEl) {
+            // Fallback: last pointer position
+            let mx = lastPointerRef.current.x + 8;
+            let my = lastPointerRef.current.y + 8;
+            mx = Math.min(Math.max(8, mx), window.innerWidth - 160);
+            my = Math.min(Math.max(8, my), window.innerHeight - 140);
+            setContextMenu({ x: mx, y: my, text });
             return;
           }
-          allPageRects.sort((a, b) => a.pageIndex - b.pageIndex);
-          const first = allPageRects[0];
-          const r = first.rect ?? {};
-          const o = r.origin ?? r; // tolerate flat {x,y} shape just in case
-          const s = r.size ?? { width: r.width, height: r.height };
-          const pdfX = (o.x || 0) * currentScale;
-          const pdfY = (o.y || 0) * currentScale;
-          const pdfW = (s.width || 0) * currentScale;
-          const pdfH = (s.height || 0) * currentScale;
-          // Anchor the menu to the live screen position of the page wrapper.
-          // Fixed positioning is immune to nested scroll containers, and the
-          // menu is transient so it does not need to track scrolling.
-          const pageEl = viewerEl.querySelector(`[data-page-index="${first.pageIndex}"]`) as HTMLElement | null;
-          let mx: number;
-          let my: number;
-          if (pageEl) {
-            const pr = pageEl.getBoundingClientRect();
-            mx = pr.left + pdfX;
-            my = pr.top + pdfY + pdfH + 6;
+
+          const pr = pageEl.getBoundingClientRect();
+          // Get all rects for this page and compute their bounding box in PDF coords
+          const pageRects = rects[firstPageIndex] as any[];
+          if (!pageRects || pageRects.length === 0) { setContextMenu(null); return; }
+
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          for (const r of pageRects) {
+            const rx = r.origin?.x ?? r.x ?? 0;
+            const ry = r.origin?.y ?? r.y ?? 0;
+            const rw = r.size?.width ?? r.width ?? 0;
+            const rh = r.size?.height ?? r.height ?? 0;
+            if (rx < minX) minX = rx;
+            if (ry < minY) minY = ry;
+            if (rx + rw > maxX) maxX = rx + rw;
+            if (ry + rh > maxY) maxY = ry + rh;
+          }
+
+          const pageStyle = pageEl.style;
+          const pdfPageW = parseFloat(pageStyle.width) || pr.width;
+          const pdfPageH = parseFloat(pageStyle.height) || pr.height;
+
+          const scaleX = pr.width / pdfPageW;
+          const scaleY = pr.height / pdfPageH;
+
+          // Position menu at the bottom-center of the selection bounding box with fallback
+          let mx: number, my: number;
+          if (minX !== Infinity && maxX !== -Infinity && !isNaN(minX) && !isNaN(maxX)) {
+            const centerX = pr.left + ((minX + maxX) / 2) * scaleX;
+            const bottomY = pr.top + maxY * scaleY;
+            mx = centerX - 70;
+            my = bottomY + 6;
           } else {
-            // Fallback: place at the last pointer position
             mx = lastPointerRef.current.x;
             my = lastPointerRef.current.y + 12;
           }
-          // Clamp so the menu stays fully on screen (~150x120 estimated)
+
           mx = Math.min(Math.max(8, mx), window.innerWidth - 160);
-          my = Math.min(Math.max(8, my), window.innerHeight - 130);
+          my = Math.min(Math.max(8, my), window.innerHeight - 140);
           setContextMenu({ x: mx, y: my, text });
         } catch { console.warn('[PdfViewer] selection error'); }
       }, 50);
@@ -709,6 +726,77 @@ const DocumentCanvas = React.memo(function DocumentCanvas({
     setContextMenu(null);
     selectionProvides?.clear(documentId);
   }, [contextMenu, onAskAi, selectionProvides, documentId]);
+
+  const handleHighlight = useCallback(() => {
+    if (!contextMenu) return;
+    const ap = annotationProvidesRef.current;
+    const sp = selectionProvidesRef.current;
+    if (!ap || !sp) { setContextMenu(null); return; }
+
+    const rects = sp.getHighlightRects(documentId);
+    if (!rects) { setContextMenu(null); return; }
+
+    // Collect all rects across pages into a flat array
+    const allSegmentRects: any[] = [];
+    let targetPageIndex = -1;
+    for (const [pageKey, list] of Object.entries(rects)) {
+      if (Array.isArray(list) && list.length > 0) {
+        if (targetPageIndex < 0) targetPageIndex = Number(pageKey);
+        for (const r of list as any[]) {
+          const rx = r.origin?.x ?? r.x ?? 0;
+          const ry = r.origin?.y ?? r.y ?? 0;
+          const rw = r.size?.width ?? r.width ?? 0;
+          const rh = r.size?.height ?? r.height ?? 0;
+          allSegmentRects.push({ 
+            origin: { x: rx, y: ry },
+            size: { width: rw, height: rh }
+          });
+        }
+      }
+    }
+    if (targetPageIndex < 0 || allSegmentRects.length === 0) {
+      setContextMenu(null);
+      return;
+    }
+
+    // Compute bounding rect from all segment rects
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const r of allSegmentRects) {
+      const rx = r.origin?.x ?? 0;
+      const ry = r.origin?.y ?? 0;
+      const rw = r.size?.width ?? 0;
+      const rh = r.size?.height ?? 0;
+      if (rx < minX) minX = rx;
+      if (ry < minY) minY = ry;
+      if (rx + rw > maxX) maxX = rx + rw;
+      if (ry + rh > maxY) maxY = ry + rh;
+    }
+    
+    if (minX === Infinity || maxX === -Infinity || isNaN(minX)) {
+      setContextMenu(null);
+      return;
+    }
+
+    const boundingRect = { 
+      origin: { x: minX, y: minY }, 
+      size: { width: maxX - minX, height: maxY - minY } 
+    };
+
+    const highlightAnnotation = {
+      type: PdfAnnotationSubtype.HIGHLIGHT,
+      id: crypto.randomUUID(),
+      pageIndex: targetPageIndex,
+      rect: boundingRect,
+      segmentRects: allSegmentRects,
+      color: '#FFFF00',
+      strokeColor: '#FFFF00',
+      opacity: 0.3,
+      author: 'User',
+    };
+    ap.createAnnotation(targetPageIndex, highlightAnnotation as any);
+    setContextMenu(null);
+    sp.clear(documentId);
+  }, [contextMenu, annotationProvides, selectionProvides, documentId]);
 
   const copyTextToClipboard = useCallback((text: string) => {
     if (!text) return;
@@ -790,6 +878,55 @@ const DocumentCanvas = React.memo(function DocumentCanvas({
     </PagePointerProvider>
   ), [documentId, tool]);
 
+  const pushUndo = useStore((s) => s.pushUndo);
+  const undo = useStore((s) => s.undo);
+  const redo = useStore((s) => s.redo);
+  const undoStack = useStore((s) => s.undoStack);
+  const redoStack = useStore((s) => s.redoStack);
+
+  // Prevent default context menu in the viewer
+  useEffect(() => {
+    const el = viewerRef.current;
+    if (!el) return;
+    const handler = (e: Event) => { e.preventDefault(); };
+    el.addEventListener('contextmenu', handler, { passive: false });
+    return () => el.removeEventListener('contextmenu', handler);
+  }, []);
+
+  // Ctrl+Z undo / Ctrl+Y or Ctrl+Shift+Z redo (on document so it works without focus)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      if (e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        undo();
+      } else if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        redo();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [undo, redo]);
+
+  // Track drag start/end for position/size undo snapshots
+  const dragStartedRef = useRef(false);
+  useEffect(() => {
+    const el = viewerRef.current;
+    if (!el) return;
+    const onDown = () => { dragStartedRef.current = true; pushUndo(); };
+    const onUp = () => { dragStartedRef.current = false; };
+    el.addEventListener('pointerdown', onDown);
+    el.addEventListener('pointerup', onUp);
+    return () => {
+      el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('pointerup', onUp);
+    };
+  }, [viewerRef, pushUndo]);
+
   return (
     <>
       <style>{`.annotation-layer-locked { pointer-events: none; }`}</style>
@@ -866,6 +1003,15 @@ const DocumentCanvas = React.memo(function DocumentCanvas({
               color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit',
             }}>
             <Copy size={13} /> Copy
+          </button>
+          <button onClick={handleHighlight}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+              padding: '6px 12px', fontSize: 12, border: 'none',
+              borderRadius: 'var(--radius-sm)', background: 'transparent',
+              color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+            <Highlighter size={13} /> Highlight
           </button>
           <button onClick={handleAskAi}
             style={{

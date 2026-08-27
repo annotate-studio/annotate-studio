@@ -132,10 +132,19 @@ interface AppState {
   canvasLocked: boolean;
   setCanvasLocked: (locked: boolean) => void;
 
+  // Undo / Redo
+  undoStack: Resource[][];
+  redoStack: Resource[][];
+  pushUndo: () => void;
+  undo: () => void;
+  redo: () => void;
+
   // Chatbot
   chatbotOpen: boolean;
   setChatbotOpen: (open: boolean) => void;
   toggleChatbot: () => void;
+  chatInputDraft: string;
+  setChatInputDraft: (text: string) => void;
   chatbotHeight: number;
   setChatbotHeight: (height: number) => void;
   chatMessages: ChatMessage[];
@@ -576,8 +585,33 @@ export const useStore = create<AppState>((set, get) => ({
   canvasLocked: false,
   setCanvasLocked: (locked) => set({ canvasLocked: locked }),
 
+  // Undo / Redo
+  undoStack: [],
+  redoStack: [],
+  pushUndo: () => set((s) => ({ undoStack: [...s.undoStack.slice(-50), s.resources.map((r) => ({ ...r }))], redoStack: [] })),
+  undo: () => set((s) => {
+    console.log('[Undo] stack size:', s.undoStack.length);
+    if (s.undoStack.length === 0) return {};
+    const prev = s.undoStack[s.undoStack.length - 1];
+    const newUndo = s.undoStack.slice(0, -1);
+    const updatedWs = s.workspaces.map((w) => w.id === s.activeWorkspaceId ? { ...w, resources: prev.map((r) => ({ ...r })) } : w);
+    console.log('[Undo] applying state:', prev);
+    return { ...s, undoStack: newUndo, redoStack: [...s.redoStack, s.resources.map((r) => ({ ...r }))], resources: prev.map((r) => ({ ...r })), workspaces: updatedWs };
+  }),
+  redo: () => set((s) => {
+    console.log('[Redo] stack size:', s.redoStack.length);
+    if (s.redoStack.length === 0) return {};
+    const next = s.redoStack[s.redoStack.length - 1];
+    const newRedo = s.redoStack.slice(0, -1);
+    const updatedWs = s.workspaces.map((w) => w.id === s.activeWorkspaceId ? { ...w, resources: next.map((r) => ({ ...r })) } : w);
+    console.log('[Redo] applying state:', next);
+    return { ...s, redoStack: newRedo, undoStack: [...s.undoStack, s.resources.map((r) => ({ ...r }))], resources: next.map((r) => ({ ...r })), workspaces: updatedWs };
+  }),
+
   // Chatbot
   chatbotOpen: false,
+  chatInputDraft: '',
+  setChatInputDraft: (text) => set({ chatInputDraft: text }),
   setChatbotOpen: (open) => set({ chatbotOpen: open }),
   toggleChatbot: () => set((s) => ({ chatbotOpen: !s.chatbotOpen })),
   chatbotHeight: 35,

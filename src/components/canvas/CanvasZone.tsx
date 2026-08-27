@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useCallback, useState, useEffect, useMemo } from 'react';
-import { Plus, Columns3, Rows3, Minus, LayoutGrid, ZoomIn, ZoomOut, Lock, Unlock, FileImage } from 'lucide-react';
+import { Plus, Columns3, Rows3, Minus, LayoutGrid, ZoomIn, ZoomOut, Lock, Unlock, FileImage, Undo2, Redo2 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import ResourceWindow from './ResourceWindow';
 import MinimizedShelf from './MinimizedShelf';
@@ -30,6 +30,10 @@ export default function CanvasZone() {
   const minimizeAllResources = useStore((s) => s.minimizeAllResources);
   const setCanvasLocked = useStore((s) => s.setCanvasLocked);
   const setSelectedResource = useStore((s) => s.setSelectedResource);
+  const undo = useStore((s) => s.undo);
+  const redo = useStore((s) => s.redo);
+  const undoStack = useStore((s) => s.undoStack);
+  const redoStack = useStore((s) => s.redoStack);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const isPanning = useRef(false);
@@ -299,6 +303,17 @@ export default function CanvasZone() {
           title={canvasLocked ? 'Unlock canvas' : 'Lock canvas'}>
           {canvasLocked ? <Lock size={12} /> : <Unlock size={12} />}
           {canvasLocked ? 'Locked' : 'Free'}
+        </button>
+        <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 4px' }} />
+        <button className="btn btn-ghost" onClick={undo} disabled={undoStack.length === 0}
+          style={{ fontSize: 11, padding: '3px 6px', borderRadius: 'var(--radius-sm)', opacity: undoStack.length === 0 ? 0.4 : 1, cursor: undoStack.length === 0 ? 'default' : 'pointer' }}
+          title="Undo (Ctrl+Z)">
+          <Undo2 size={13} />
+        </button>
+        <button className="btn btn-ghost" onClick={redo} disabled={redoStack.length === 0}
+          style={{ fontSize: 11, padding: '3px 6px', borderRadius: 'var(--radius-sm)', opacity: redoStack.length === 0 ? 0.4 : 1, cursor: redoStack.length === 0 ? 'default' : 'pointer' }}
+          title="Redo (Ctrl+Y)">
+          <Redo2 size={13} />
         </button>
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>

@@ -97,6 +97,7 @@ export default function ChatbotZone() {
     aiDetached, setAiDetached, aiWindowPosition, aiWindowSize,
     setAiWindowPosition, setAiWindowSize,
     summarizeTarget, setSummarizeTarget,
+    chatInputDraft, setChatInputDraft,
     chatSessions, activeSessionId, createChatSession, switchChatSession, deleteChatSession,
     documents, resources,
   } = useStore();
@@ -309,6 +310,14 @@ After the summary, offer a small continuation menu — such as "go deeper on any
     };
     doSummarize();
   }, [summarizeTarget]);
+
+  // Pre-fill chat input from chatInputDraft (e.g. from AskAi context menu)
+  useEffect(() => {
+    if (!chatInputDraft) return;
+    setInput(chatInputDraft);
+    setChatInputDraft('');
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, [chatInputDraft, setChatInputDraft]);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
 
