@@ -616,71 +616,13 @@ const DocumentCanvas = React.memo(function DocumentCanvas({
           const text = texts.join('\n').trim();
           if (!text) return;
 
-          const rects = sp.getHighlightRects(documentId);
-          const viewerEl = viewerRef.current;
-          if (!rects || !viewerEl) { setContextMenu(null); return; }
+          // Place centered horizontally on pointer X, exactly 10px below pointer Y
+          let mx = lastPointerRef.current.x - 70; // 70 is half of menu min-width (140px)
+          let my = lastPointerRef.current.y + 10;
 
-          // Find the first page that has selection rects
-          let firstPageIndex = -1;
-          for (const [pageKey, list] of Object.entries(rects)) {
-            if (Array.isArray(list) && list.length > 0) {
-              firstPageIndex = Number(pageKey);
-              break;
-            }
-          }
-          if (firstPageIndex < 0) { setContextMenu(null); return; }
-
-          // Use the page wrapper's bounding rect to convert PDF coords to viewport
-          const pageEl = viewerEl.querySelector(`[data-page-index="${firstPageIndex}"]`) as HTMLElement | null;
-          if (!pageEl) {
-            // Fallback: last pointer position
-            let mx = lastPointerRef.current.x + 8;
-            let my = lastPointerRef.current.y + 8;
-            mx = Math.min(Math.max(8, mx), window.innerWidth - 160);
-            my = Math.min(Math.max(8, my), window.innerHeight - 140);
-            setContextMenu({ x: mx, y: my, text });
-            return;
-          }
-
-          const pr = pageEl.getBoundingClientRect();
-          // Get all rects for this page and compute their bounding box in PDF coords
-          const pageRects = rects[firstPageIndex] as any[];
-          if (!pageRects || pageRects.length === 0) { setContextMenu(null); return; }
-
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          for (const r of pageRects) {
-            const rx = r.origin?.x ?? r.x ?? 0;
-            const ry = r.origin?.y ?? r.y ?? 0;
-            const rw = r.size?.width ?? r.width ?? 0;
-            const rh = r.size?.height ?? r.height ?? 0;
-            if (rx < minX) minX = rx;
-            if (ry < minY) minY = ry;
-            if (rx + rw > maxX) maxX = rx + rw;
-            if (ry + rh > maxY) maxY = ry + rh;
-          }
-
-          const pageStyle = pageEl.style;
-          const pdfPageW = parseFloat(pageStyle.width) || pr.width;
-          const pdfPageH = parseFloat(pageStyle.height) || pr.height;
-
-          const scaleX = pr.width / pdfPageW;
-          const scaleY = pr.height / pdfPageH;
-
-          // Position menu at the bottom-center of the selection bounding box with fallback
-          let mx: number, my: number;
-          if (minX !== Infinity && maxX !== -Infinity && !isNaN(minX) && !isNaN(maxX)) {
-            const centerX = pr.left + ((minX + maxX) / 2) * scaleX;
-            const bottomY = pr.top + maxY * scaleY;
-            mx = centerX - 70;
-            my = bottomY + 6;
-          } else {
-            mx = lastPointerRef.current.x;
-            my = lastPointerRef.current.y + 12;
-          }
-
-          mx = Math.min(Math.max(8, mx), window.innerWidth - 160);
-          my = Math.min(Math.max(8, my), window.innerHeight - 140);
-          setContextMenu({ x: mx, y: my, text });
+          const clampedX = Math.min(Math.max(8, mx), window.innerWidth - 160);
+          const clampedY = Math.min(Math.max(8, my), window.innerHeight - 140);
+          setContextMenu({ x: clampedX, y: clampedY, text });
         } catch { console.warn('[PdfViewer] selection error'); }
       }, 50);
     });
@@ -893,7 +835,7 @@ const DocumentCanvas = React.memo(function DocumentCanvas({
     return () => el.removeEventListener('contextmenu', handler);
   }, []);
 
-  // Ctrl+Z undo / Ctrl+Y or Ctrl+Shift+Z redo (on document so it works without focus)
+  // Ctrl+Z undo / Ctrl+Y or Ctrl+Shift+Z redo, and Ctrl+Plus / Ctrl+Minus zoom (on document so it works without focus)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -906,6 +848,14 @@ const DocumentCanvas = React.memo(function DocumentCanvas({
         e.preventDefault();
         e.stopPropagation();
         redo();
+      } else if (e.key === '=' || e.key === '+' || e.code === 'Equal' || e.code === 'NumpadAdd') {
+        e.preventDefault();
+        e.stopPropagation();
+        zoomProvidesRef.current?.zoomIn();
+      } else if (e.key === '-' || e.key === '_' || e.code === 'Minus' || e.code === 'NumpadSubtract') {
+        e.preventDefault();
+        e.stopPropagation();
+        zoomProvidesRef.current?.zoomOut();
       }
     };
     document.addEventListener('keydown', handler);
