@@ -1,199 +1,100 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Layers, Plus, Pencil, Trash2, Check, ArrowLeft } from 'lucide-react';
-import { useStore } from '@/lib/store';
-import Dialog from '@/components/ui/Dialog';
-
-type DialogView =
-  | { mode: 'list' }
-  | { mode: 'create' }
-  | { mode: 'rename'; id: string; name: string }
-  | { mode: 'delete'; id: string; name: string };
-
-const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '8px 12px', fontSize: 13, border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface)', color: 'var(--text-primary)',
-  outline: 'none', fontFamily: 'inherit',
-};
+import React, { useRef, useState } from 'react';
+import { Check, ChevronDown, Layers, Pencil, Plus, Trash2 } from 'lucide-react';
+import Popover from '@/components/ui/Popover';
+import { useCanvas } from '@/store/canvas';
+import { confirmDialog, promptDialog } from '@/store/dialogs';
+import { cn } from '@/lib/utils';
 
 export default function WorkspaceSwitcher() {
-  const workspaces = useStore((s) => s.workspaces);
-  const activeWorkspaceId = useStore((s) => s.activeWorkspaceId);
-  const setActiveWorkspace = useStore((s) => s.setActiveWorkspace);
-  const createWorkspace = useStore((s) => s.createWorkspace);
-  const removeWorkspace = useStore((s) => s.removeWorkspace);
-  const renameWorkspace = useStore((s) => s.renameWorkspace);
-
+  const workspaces = useCanvas((state) => state.workspaces);
+  const activeId = useCanvas((state) => state.activeWorkspaceId);
   const [open, setOpen] = useState(false);
-  const [view, setView] = useState<DialogView>({ mode: 'list' });
-  const [wsName, setWsName] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const active = workspaces.find((w) => w.id === activeId) ?? workspaces[0];
 
-  const activeWs = workspaces.find((w) => w.id === activeWorkspaceId) || workspaces[0];
-
-  useEffect(() => {
-    if (open && view.mode !== 'list' && inputRef.current) inputRef.current.focus();
-  }, [open, view.mode]);
-
-  const goBack = () => setView({ mode: 'list' });
-
-  const handleCreate = () => {
-    const name = wsName.trim();
-    if (!name) return;
-    createWorkspace(name);
-    setWsName('');
-    setView({ mode: 'list' });
+  const create = async () => {
+    setOpen(false);
+    const name = await promptDialog({ title: 'New workspace', placeholder: 'e.g. Organic Chemistry', confirmLabel: 'Create' });
+    if (name) useCanvas.getState().createWorkspace(name);
   };
 
-  const handleRename = () => {
-    if (view.mode !== 'rename') return;
-    const name = wsName.trim();
-    if (!name) return;
-    renameWorkspace(view.id, name);
-    setView({ mode: 'list' });
+  const rename = async (id: string, current: string) => {
+    setOpen(false);
+    const name = await promptDialog({ title: 'Rename workspace', initialValue: current, confirmLabel: 'Rename' });
+    if (name) useCanvas.getState().renameWorkspace(id, name);
   };
 
-  const handleDelete = () => {
-    if (view.mode !== 'delete') return;
-    removeWorkspace(view.id);
-    setView({ mode: 'list' });
+  const remove = async (id: string, name: string, count: number) => {
+    setOpen(false);
+    const ok = await confirmDialog({
+      title: `Delete “${name}”?`,
+      message:
+        count > 0
+          ? `Its ${count} window${count > 1 ? 's' : ''} will be removed from the canvas. Your files stay in the library.`
+          : 'This empty workspace will be removed.',
+      confirmLabel: 'Delete workspace',
+      danger: true,
+    });
+    if (ok) useCanvas.getState().deleteWorkspace(id);
   };
-
-  const dialogTitle =
-    view.mode === 'create' ? 'New Workspace' :
-    view.mode === 'rename' ? 'Rename Workspace' :
-    view.mode === 'delete' ? 'Delete Workspace' :
-    'Workspaces';
 
   return (
     <>
-      <button
-        className="btn btn-ghost"
-        onClick={() => { setView({ mode: 'list' }); setOpen(true); }}
-        style={{
-          fontSize: 11, padding: '3px 10px', borderRadius: 'var(--radius-sm)',
-          display: 'flex', alignItems: 'center', gap: 5,
-          color: 'var(--text-secondary)',
-        }}
-        title="Switch workspace"
-      >
-        <Layers size={12} />
-        <span style={{ maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {activeWs?.name || 'Default'}
-        </span>
+      <button ref={anchorRef} type="button" className="toolbar-btn workspace-btn" onClick={() => setOpen((v) => !v)} title="Workspaces">
+        <Layers size={14} />
+        <span className="workspace-name">{active?.name ?? 'Workspace'}</span>
+        <ChevronDown size={13} />
       </button>
-
-      <Dialog open={open} onClose={() => setOpen(false)} title={dialogTitle} width={380}>
-        {view.mode === 'list' && (
-          <>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 320, overflow: 'auto' }}>
-              {workspaces.map((ws) => {
-                const isActive = ws.id === activeWorkspaceId;
-                return (
-                  <div
-                    key={ws.id}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      padding: '8px 10px', borderRadius: 'var(--radius-sm)',
-                      background: isActive ? 'var(--primary-light)' : 'transparent',
-                      cursor: 'pointer', transition: 'background 0.1s',
-                    }}
-                    onClick={() => { setActiveWorkspace(ws.id); setOpen(false); }}
-                    onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--bg-elevated)'; }}
-                    onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+      <Popover anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} width={280}>
+        <div className="menu">
+          <div className="menu-heading">Workspaces</div>
+          {workspaces.map((workspace) => {
+            const isActive = workspace.id === activeId;
+            return (
+              <div key={workspace.id} className={cn('menu-row', isActive && 'menu-item-active')}>
+                <button
+                  type="button"
+                  className="menu-item menu-row-main"
+                  onClick={() => {
+                    useCanvas.getState().switchWorkspace(workspace.id);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="menu-item-icon">{isActive ? <Check size={13} /> : null}</span>
+                  <span className="menu-item-label">
+                    {workspace.name}
+                    <small>
+                      {workspace.resources.length} window{workspace.resources.length === 1 ? '' : 's'}
+                    </small>
+                  </span>
+                </button>
+                <button type="button" className="icon-btn icon-btn-sm" onClick={() => void rename(workspace.id, workspace.name)} title="Rename">
+                  <Pencil size={12} />
+                </button>
+                {workspaces.length > 1 && (
+                  <button
+                    type="button"
+                    className="icon-btn icon-btn-sm icon-btn-danger"
+                    onClick={() => void remove(workspace.id, workspace.name, workspace.resources.length)}
+                    title="Delete"
                   >
-                    <Layers size={14} style={{ color: isActive ? 'var(--primary)' : 'var(--text-muted)', flexShrink: 0 }} />
-                    <span style={{
-                      flex: 1, fontSize: 13, fontWeight: isActive ? 600 : 400,
-                      color: isActive ? 'var(--primary)' : 'var(--text-primary)',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
-                      {ws.name}
-                    </span>
-                    {isActive && <Check size={13} style={{ color: 'var(--primary)', flexShrink: 0 }} />}
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setWsName(ws.name); setView({ mode: 'rename', id: ws.id, name: ws.name }); }}
-                      style={{ padding: 3, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', borderRadius: 'var(--radius-xs)' }}
-                      title="Rename"
-                    >
-                      <Pencil size={12} />
-                    </button>
-                    {workspaces.length > 1 && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setView({ mode: 'delete', id: ws.id, name: ws.name }); }}
-                        style={{ padding: 3, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', borderRadius: 'var(--radius-xs)' }}
-                        title="Delete"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ borderTop: '1px solid var(--border)', marginTop: 10, paddingTop: 10 }}>
-              <button
-                onClick={() => { setWsName(''); setView({ mode: 'create' }); }}
-                className="btn btn-ghost"
-                style={{
-                  width: '100%', fontSize: 12, padding: '7px 12px', borderRadius: 'var(--radius-sm)',
-                  display: 'flex', alignItems: 'center', gap: 6, color: 'var(--primary)',
-                  justifyContent: 'flex-start',
-                }}
-              >
-                <Plus size={13} /> New Workspace
-              </button>
-            </div>
-          </>
-        )}
-
-        {view.mode === 'create' && (
-          <>
-            <input
-              ref={inputRef}
-              value={wsName}
-              onChange={(e) => setWsName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
-              placeholder="Workspace name"
-              style={inputStyle}
-            />
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
-              <button onClick={goBack} className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 14px', borderRadius: 'var(--radius-sm)' }}>Cancel</button>
-              <button onClick={handleCreate} className="btn btn-primary" style={{ fontSize: 12, padding: '6px 14px', borderRadius: 'var(--radius-sm)' }}>Create</button>
-            </div>
-          </>
-        )}
-
-        {view.mode === 'rename' && (
-          <>
-            <input
-              ref={inputRef}
-              value={wsName}
-              onChange={(e) => setWsName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleRename(); }}
-              placeholder="Workspace name"
-              style={inputStyle}
-            />
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
-              <button onClick={goBack} className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 14px', borderRadius: 'var(--radius-sm)' }}>Cancel</button>
-              <button onClick={handleRename} className="btn btn-primary" style={{ fontSize: 12, padding: '6px 14px', borderRadius: 'var(--radius-sm)' }}>Rename</button>
-            </div>
-          </>
-        )}
-
-        {view.mode === 'delete' && (
-          <>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
-              Delete workspace <strong>{view.name}</strong>? All materials in this workspace will be removed from the canvas.
-            </p>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-              <button onClick={goBack} className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 14px', borderRadius: 'var(--radius-sm)' }}>Cancel</button>
-              <button onClick={handleDelete} className="btn" style={{ fontSize: 12, padding: '6px 14px', borderRadius: 'var(--radius-sm)', background: 'var(--danger)', color: 'white', border: 'none' }}>Delete</button>
-            </div>
-          </>
-        )}
-      </Dialog>
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          <div className="menu-separator" />
+          <button type="button" className="menu-item" onClick={() => void create()}>
+            <span className="menu-item-icon">
+              <Plus size={13} />
+            </span>
+            <span className="menu-item-label">New workspace</span>
+          </button>
+        </div>
+      </Popover>
     </>
   );
 }
