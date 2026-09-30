@@ -1,187 +1,168 @@
-/home/tahad/Code/annotate-studio/docs/AnnotateStudio-Logo.png<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="src-tauri/icons/icon.png">
-    <img src="src-tauri/icons/128x128.png" alt="Annotate Studio logo" width="128" height="128">
-  </picture>
-  <h1>Annotate Studio</h1>
-</div>
-
-<p align="center">
-  A local-first, AI-powered study environment for the desktop.
-</p>
-
 <div align="center">
-  <table>
-    <tr>
-      <td width="50%" valign="top">
-        Annotate Studio is a fully offline-capable study workspace that brings together flashcards, exam practice, note-taking, PDF annotation, a Pomodoro timer, and optional AI assistance into a single, integrated desktop application. Every feature works without an internet connection; AI is an opt-in enhancement that you configure with your own provider (local or remote).
-        <br><br>
-        Built as a <strong>hybrid desktop application</strong> using <a href="https://tauri.app">Tauri v2</a> and <a href="https://nextjs.org">Next.js 15</a>, it runs natively on Windows, macOS, and Linux without Electron's resource overhead. The Rust backend handles file I/O, the SM-2 spaced repetition engine, AI provider routing, and data persistence via SQLite, while the React frontend provides the interactive canvas, rich text editing, and study tool UIs.
-      </td>
-      <td width="50%" align="center">
-        <p><em>(Screenshot to be added)</em></p>
-        <p>
-          <a href="#getting-started">Getting Started</a> &middot;
-          <a href="#features">Features</a> &middot;
-          <a href="#tech-stack">Tech Stack</a>
-        </p>
-      </td>
-    </tr>
-  </table>
+  <img src="src-tauri/icons/128x128.png" alt="Annotate Studio logo" width="112" height="112">
+  <h1>Annotate Studio</h1>
+  <p>A local-first study workspace for the desktop: an infinite canvas for PDFs and notes, spaced-repetition flashcards, practice exams, a Pomodoro timer and an optional AI assistant.</p>
 </div>
 
-## How It Works
+Everything runs on your machine. Documents, notes, canvas layouts, flashcards, exams and settings are plain files in one data folder, and the app works fully offline. AI features are opt-in and talk directly to the provider you configure (a local Ollama model or a cloud API).
 
-The application is organized around an **infinite canvas** that serves as your primary workspace. From here you open PDFs, write notes, and arrange your materials side by side. Dedicated tabs in the sidebar provide focused tools for flashcards (powered by the SM-2 spaced repetition algorithm), timed exam practice, a Pomodoro timer, and an AI chat panel.
-
-All data lives on your machine at `$DATA_DIR/annotate-studio/`. Canvas state, flashcard decks, exam results, and settings are persisted as JSON and SQLite files through Tauri's Rust backend. When you configure an AI provider (local Ollama, OpenAI, Anthropic, etc.), requests are routed through a multi-provider adapter that never shares your data without your chosen endpoint.
+Built with [Tauri 2](https://tauri.app) (Rust) and [Next.js 15](https://nextjs.org) / React 19.
 
 ## Features
 
-### Canvas Workspace
+### Canvas
 
-The canvas is an infinite, pannable (Alt+drag or middle-mouse) and zoomable (Ctrl+scroll) surface. Resources open as draggable, resizable windows using `react-rnd`:
+- Infinite canvas with a dot grid, smooth zoom around the pointer (Ctrl + scroll or trackpad pinch) and panning by dragging the background, holding <kbd>Space</kbd>, the middle mouse button or two-finger scrolling.
+- Windows for PDFs, Markdown notes and images that drag and resize precisely at any zoom level, come to the front when clicked, maximize to fill the view (double-click the title bar or press the maximize button, <kbd>Esc</kbd> restores) and minimize to a dock.
+- Minimap, “fit all” (<kbd>Shift</kbd>+<kbd>1</kbd>), zoom to the selected window (<kbd>Shift</kbd>+<kbd>2</kbd>), one-click layouts (side by side, stacked, grid) and a lock to freeze the view.
+- Undo and redo for layout changes (<kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>).
+- Multiple workspaces, each with its own layout.
+- Drop files from your file manager, paste an image or text, double-click the background for a quick note, or right-click for more actions. Importing the same file twice reuses the existing copy instead of duplicating it.
 
-- **PDF Viewer**: Renders pages using PDFium via EmbedPDF's WASM engine. You can annotate with pen, highlighter, rectangle, circle, and arrow tools; select text and send it to the AI for summarisation or explanation; zoom in and out; and export the annotated PDF as a new file.
-- **Markdown Notes**: A CodeMirror 6-based editor with a formatting toolbar (bold, italic, heading, code, list, link) and live preview. Supports KaTeX inline and block math, fenced code blocks with language labels, tables, blockquotes, and `[[wiki-links]]` that autocomplete to other files in your workspace.
-- **Image Viewer**: Displays reference images loaded from your workspace.
-- **Window Management**: Each resource window can be dragged, resized, minimised (to a shelf at the top of the canvas), maximised to full canvas, tiled horizontally or vertically alongside other windows, or closed. Canvas state (positions, sizes, open resources) is saved to disk automatically.
+### PDF reader and annotation
 
-### Flashcards with Spaced Repetition
+- Rendering by PDFium (via EmbedPDF), shared by all PDF windows and running in a Web Worker when available, with sharp re-rendering while the canvas is zoomed.
+- Tools: select, highlight text, pen, marker, text, rectangle, ellipse, arrow and eraser, with colors and stroke widths. Keyboard shortcuts: <kbd>V</kbd> <kbd>H</kbd> <kbd>P</kbd> <kbd>M</kbd> <kbd>T</kbd> <kbd>R</kbd> <kbd>O</kbd> <kbd>A</kbd> <kbd>E</kbd>.
+- Annotations are saved back into the workspace copy of the PDF automatically, with their own undo history; “Export” saves an annotated copy anywhere.
+- Selecting text shows a menu to copy, highlight, underline, ask the assistant, get a step-by-step explanation or turn the passage into flashcards.
+- Links inside PDFs work: table-of-contents entries and references jump to their page, and web links open in your browser.
+- Page navigation, zoom controls and fit-to-width.
 
-The flashcard system implements the **SM-2 algorithm** in Rust, the same algorithm that powers Anki and SuperMemo. Cards are organised into **collections**, each with its own review period (e.g., 10 cards per day):
+### Notes
 
-- **Review Mode**: Cards are presented one at a time with a 3D CSS flip animation. After revealing the answer, you rate your recall: Again (forgot, resets interval), Hard (recalled with difficulty), Good (normal recall), Easy (trivial). The SM-2 engine recalculates the card's ease factor, interval, and next review date.
-- **Browse Mode**: Displays all cards in a collection as a list with expandable answers, showing each card's ease factor, interval, and repetition count.
-- **Card Generation**: Paste any study material and the AI will extract Q&A pairs and create flashcards automatically. You can also add cards manually.
-- **Filters**: Filter cards by Due (ready for review), New (never reviewed), Young (reviewed fewer than 21 times), or Mature (reviewed 21+ times).
-- **Notifications**: A background poll checks for due cards every 60 seconds and sends a browser notification.
+- Notes are real Markdown files in the `notes` folder, edited with CodeMirror: syntax highlighting, list continuation, search, formatting shortcuts (<kbd>Ctrl</kbd>+<kbd>B</kbd>/<kbd>I</kbd>/<kbd>E</kbd>/<kbd>K</kbd>) and autosave.
+- Edit, split and preview modes. The preview renders headings, nested and task lists, tables with alignment, code blocks with a copy button, block quotes, images from the workspace and KaTeX math.
+- `[[Wiki links]]` autocomplete from your library; clicking one opens the file on the canvas or offers to create the note.
+- Right-to-left text such as Persian or Arabic is detected per line and paragraph, including lists and tables.
+- Windows line endings are kept when a note is saved, and text files in other encodings open read-only so their characters are never damaged.
 
-### Exam Practice
+### Library
 
-Exams are created manually or generated by AI, consisting of multiple-choice and verbal (free-text) questions:
+- Every PDF, note, image and document in the workspace, searchable, filterable by type and sortable by recent use, modification date, name or size.
+- Open on the canvas, rename, delete, summarize, explain or make flashcards from any file.
 
-- **Exam Creation**: Write questions individually or describe a topic to the AI generator, which uses template-based domain detection (Math, Science, Computer Science, History, Language, General) to produce 5-6 MCQ and 1 verbal question with modelled answers.
-- **Taking an Exam**: Timed mode counts down from your set duration. You navigate questions freely, mark answers, and can toggle instant feedback to see whether each answer is correct as you go.
-- **Review**: After submission, the app calculates a score percentage, marks pass/fail, and displays every question with your answer, the correct answer, and whether you got it right.
-- **State Management**: Exams exist in one of three states: draft, in-progress, or completed. You can retake any completed exam.
+### Flashcards
 
-### Pomodoro Timer
+- Collections, manual cards with Markdown and math, and AI generation from pasted text or a document (PDF, Markdown, text, DOCX, ODT). Long documents are processed in parts with progress and a stop button.
+- Anki-style SM-2 scheduling: “Again” relearns after ten minutes, “Hard” grows the interval slowly, “Good” keeps the ease, “Easy” grows faster. The next interval is shown on each button.
+- Review sessions with a flip card and keyboard control (<kbd>Space</kbd> to flip, <kbd>1</kbd>–<kbd>4</kbd> to rate); failed cards come back at the end of the session.
+- “Practice all” lets you go through cards that are not due yet without changing their schedule.
 
-A configurable timer for time-boxed study sessions:
+### Exams
 
-- **Durations**: Focus (default 25 min), short break (5 min), long break (15 min). All values are customisable from the interface.
-- **Session Flow**: The timer automatically switches between focus and break sessions. Every fourth break is a long break.
-- **Sound**: Four sound effects (beep, bell, chime, digital) are generated at runtime via the Web Audio API: no audio files bundled.
-- **Visual Feedback**: A circular SVG progress indicator shows remaining time. Session count is displayed beneath the timer.
+- Write exams by hand or generate them with AI from a topic or one of your documents (number of questions, difficulty and time limit are adjustable).
+- Timed attempts that keep running if you switch tabs, keyboard answering, optional instant feedback, and a results page with explanations and attempt history.
+- Written answers can be graded by you or by the AI with feedback.
 
-### AI Assistance (Optional)
+### Pomodoro
 
-AI capabilities are entirely optional and require configuring a provider in the Settings tab. Supported providers: **OpenAI, Anthropic (Claude), Ollama (fully local), DeepSeek, OpenRouter, Groq.**
+- Focus and break timers that keep running anywhere in the app (the remaining time is shown in the title bar), configurable durations, long-break interval and auto-start, synthesized sounds and desktop notifications, plus today’s focus statistics.
 
-- **AI Counsellor**: A dedicated chat panel with a compassionate system prompt, designed to keep you motivated and help you work through study difficulties.
-- **Step-by-step Explainer**: Describe a topic you are struggling with and the AI returns a structured lesson with an overview, numbered steps, and a summary. You can ask follow-up questions on each step.
-- **PDF Summarisation**: The app extracts text from the currently open PDF (via pdfjs) and sends it to the AI for a concise summary.
-- **Flashcard Generation**: AI creates Q&A flashcards from any content you paste.
-- **Exam Generation**: AI produces topic-specific practice exams.
-- **Ask AI from PDF**: Select any text in the PDF viewer and click "Ask AI" to get an explanation or elaboration.
+### AI assistant
 
-### Study Tools
+- Chat panel docked under the canvas or floating, with saved conversations, a model picker and Markdown/KaTeX answers.
+- Attach documents with `@name`; their text is included with your question. PDFs are read with PDFium, so no separate text extractor is needed.
+- Summaries, step-by-step lessons with follow-up questions, and flashcards straight from the chat (“make 10 flashcards about …”).
+- Requests can be stopped at any time, and Retry repeats exactly what failed (a summary stays a summary, with the same document).
+- Providers: OpenAI, Anthropic, Google Gemini, Ollama, OpenRouter, Groq, DeepSeek, Mistral, Together, xAI, Perplexity and Cohere. Newer OpenAI models that reject `max_tokens` or custom temperatures are retried automatically.
 
-- **Motivation Tab**: A library of 15 built-in inspirational quotes (refreshable) alongside four static encouragement cards and the AI Counsellor chat.
-- **Documents Tab**: A grid-style file browser that lists all PDFs, Markdown files, and images in your workspace. Supports search by filename, single-click open on the canvas, and file deletion.
-- **Settings Tab**: Controls for appearance (5 themes: White, Black, Sepia, Gray, Forest; custom primary colour with 6 presets and a colour picker; custom background image URL), interface scaling (100% to 200%), and AI provider configuration (add, edit, set default, test connection).
+### Motivation and settings
 
-## Getting Started
+- A motivation corner with quotes, quick resets and a supportive study coach.
+- Eight themes including a dark theme, any accent color, interface scaling, notifications, backup to a single `.anos` file and restore (a safety copy of the current data is made first).
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
+| :-- | :-- |
+| <kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>6</kbd>, <kbd>Ctrl</kbd>+<kbd>,</kbd> | Switch between Canvas, Library, Flashcards, Exams, Pomodoro, Motivation, Settings |
+| <kbd>Ctrl</kbd>+<kbd>J</kbd> | Toggle the assistant |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd> | New note |
+| <kbd>Ctrl</kbd>+<kbd>=</kbd> / <kbd>-</kbd> / <kbd>0</kbd> | Zoom in, out, reset (acts on the PDF when a PDF window is active) |
+| <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> | Undo / redo |
+| <kbd>Shift</kbd>+<kbd>1</kbd> / <kbd>Shift</kbd>+<kbd>2</kbd> | Fit all windows / zoom to the selected window |
+| <kbd>Shift</kbd> while dragging | Snap windows to a 20 px grid |
+
+The full list is under Settings → Shortcuts.
+
+## Getting started
 
 ### Prerequisites
 
-- **Node.js** >= 18
-- **Rust** (nightly or stable with Tauri v2 support)
-- **Tauri CLI** v2 (`cargo install tauri-cli`)
-- System dependencies for Tauri (see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/))
+- Node.js 18 or newer and Yarn 1
+- Rust (stable)
+- The [Tauri 2 system dependencies](https://v2.tauri.app/start/prerequisites/) for your platform (on Linux: WebKitGTK 4.1, libsoup 3, GTK 3)
+- With Nix: `nix develop` provides everything
 
-### Quick Start
-
-```bash
-git clone <repo-url>
-cd annotate-studio
-npm install
-npm run dev
-```
-
-The Next.js dev server starts on `localhost:3000`. To launch the Tauri desktop shell alongside it:
+### Run
 
 ```bash
-npm run tauri dev
+yarn install
+yarn tauri dev
 ```
 
-### Production Build
+### Build
 
 ```bash
-npm run build        # static export to dist/
-npm run tauri build  # bundle native app
+yarn tauri build
 ```
 
-The compiled application will be available in `src-tauri/target/release/bundle/`.
+Installers are written to `src-tauri/target/release/bundle/`.
 
-### Configuration
+### Checks
 
-No configuration is required to begin using the app. AI providers can be added later from the Settings tab. For fully local AI, install [Ollama](https://ollama.ai); the app detects it automatically when you configure the Ollama provider.
+```bash
+yarn typecheck                 # TypeScript
+yarn test                      # parser and helper tests (Node 22+)
+cd src-tauri && cargo test     # backend tests
+```
 
-## Project Structure
+## Where your data lives
+
+All data is stored under your local data directory in `annotate-studio/` (for example `~/.local/share/annotate-studio` on Linux, `%LOCALAPPDATA%\annotate-studio` on Windows and `~/Library/Application Support/annotate-studio` on macOS):
+
+| Path | Contents |
+| :-- | :-- |
+| `documents/` | Imported PDFs, images and documents (annotations are saved into these copies) |
+| `notes/` | Markdown notes |
+| `canvas/state.json` | Workspaces and window layouts |
+| `settings.json` | Appearance, timer and assistant preferences |
+| `flashcards.json`, `collections.json` | Cards with their schedules, and collections |
+| `exams_data.json` | Exams and results |
+| `chat_sessions.json`, `motivation_sessions.json` | Conversations |
+| `providers.json` | AI provider configuration, including API keys (readable only by your user account on Linux and macOS) |
+| `analytics/activities.jsonl` | Study activity log |
+| `backups/` | Safety copies made before restoring a backup |
+
+Files are written atomically, and a file that cannot be parsed is kept as `*.corrupt-<date>` instead of being overwritten. Data from earlier versions is migrated automatically.
+
+## Project structure
 
 ```
 src/
-  app/                    # Next.js App Router pages and global styles
+  app/                  Next.js entry, global styles and fonts
   components/
-    canvas/               # Infinite canvas, PDF viewer, notes, resource windows
-    chatbot/              # AI chat panels (counsellor, explainer)
-    layout/               # Sidebar, title bar, glass panel
-    study/                # Flashcards, exams, pomodoro, motivation, documents, settings
-    ui/                   # Reusable primitives (dialog, etc.)
-  lib/
-    store.ts              # Zustand global state
-    tauri-commands.ts     # Tauri IPC bridge
-src-tauri/
-  src/
-    main.rs               # Application entry point and all Tauri commands
-    ai_router.rs          # Multi-provider AI routing
-    filesystem.rs         # File system abstraction
-    spaced_repetition.rs  # SM-2 algorithm engine
-    vector_db.rs          # SQLite-backed keyword / vector search
-    analytics.rs          # Study activity logging and stats
-  Cargo.toml
-  tauri.conf.json
+    app/                App-wide effects: loading, timers, notifications, shortcuts
+    canvas/             Canvas viewport, windows, PDF, note and image views, minimap, dock
+    chatbot/            Assistant panel, chat engine and lesson view
+    markdown/           Markdown renderer and CodeMirror editor
+    study/              Library, flashcards, exams, Pomodoro, motivation, settings
+    layout/             Title bar and sidebar
+    ui/                 Dialogs, toasts, menus, popovers, pickers
+  lib/                  IPC bridge, Markdown parser, PDF engine, AI helpers, utilities
+  store/                Zustand stores with debounced persistence
+src-tauri/src/
+  commands/             Tauri commands: files, data, flashcards, AI, backup
+  ai_router.rs          Multi-provider AI client
+  ai_json.rs            Robust parsing of AI output
+  spaced_repetition.rs  Scheduling engine
+  paths.rs, storage.rs  Workspace path safety and atomic storage
+  text.rs               Text extraction and chunking
+  filesystem.rs, analytics.rs, vector_db.rs, state.rs
 ```
-
-## Tech Stack
-
-| Layer             | Technology                                         |
-| :---------------- | :------------------------------------------------- |
-| Desktop Shell     | Tauri v2 (Rust)                                    |
-| Frontend          | Next.js 15, React 19, TypeScript                   |
-| State             | Zustand v5                                         |
-| Styling           | Tailwind CSS v4 + CSS custom properties (5 themes) |
-| PDF Rendering     | EmbedPDF (PDFium WASM)                             |
-| Markdown Editor   | CodeMirror 6                                       |
-| Math Rendering    | KaTeX                                              |
-| Window Management | react-rnd                                          |
-| Database          | SQLite via rusqlite                                |
-| AI Networking     | reqwest (HTTP), provider-agnostic router           |
-| Icons             | Lucide React                                       |
-| Animation         | Framer Motion                                      |
-
----
 
 ## Credits
 
-**Idea and Feature Design**: Taha Dostifam. This application was conceived and built for personal use, collecting the study tools needed in one place: flashcards with SM-2 repetition, exam practice, PDF annotation, a Pomodoro timer, and optional AI assistance: into a single local-first desktop application.
+**Idea and feature design**: Taha Dostifam. The application was conceived for personal use, collecting the study tools needed in one place: flashcards with spaced repetition, exam practice, PDF annotation, a Pomodoro timer and optional AI assistance.
 
-**Engineering**: The codebase was developed with LLM-assisted engineering, enabling a broad set of features across TypeScript, React, Rust, and SQLite to be implemented by a single developer.
-
-[License](./LICENSE).
-
----
-
-> _Study smarter, locally._
+[License](./LICENSE)
