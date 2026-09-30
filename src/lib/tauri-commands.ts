@@ -1,57 +1,58 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, type InvokeArgs } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-// ── Types ───────────────────────────────────────────────────────────
-
-export type FileType = 'Pdf' | 'Markdown' | 'StickyNote' | 'Image' | 'Unknown';
+export type FileType = 'Pdf' | 'Markdown' | 'Text' | 'Image' | 'Document' | 'Unknown';
 
 export interface StudyFile {
   id: string;
   name: string;
   path: string;
   file_type: FileType;
+  size: number;
   created_at: string;
-  lastOpened?: string;
-  x: number;
-  y: number;
+  modified_at: string;
 }
 
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
+export type ChatRole = 'system' | 'user' | 'assistant';
+
+export interface ChatMessagePayload {
+  role: ChatRole;
   content: string;
 }
-
-export type TaskType =
-  | 'Explain'
-  | 'GenerateFlashcard'
-  | 'Summarize'
-  | 'Quiz'
-  | 'Translate'
-  | 'CodeExplain'
-  | 'Custom';
 
 export interface AIResponse {
   content: string;
   provider: string;
   model: string;
-  tokens_used?: number;
+  tokens_used?: number | null;
 }
+
+export interface ProviderInfo {
+  id: string;
+  type: string;
+  model: string;
+  endpoint?: string | null;
+  active: boolean;
+}
+
+export type ReviewQuality = 'Again' | 'Hard' | 'Good' | 'Easy';
 
 export interface Flashcard {
   id: string;
   front: string;
   back: string;
-  source_file?: string;
-  source_context?: string;
+  source_file?: string | null;
+  source_context?: string | null;
   ease_factor: number;
   interval_days: number;
   repetitions: number;
+  lapses?: number;
   next_review: string;
   created_at: string;
-  last_reviewed?: string;
-  collectionId?: string;
+  last_reviewed?: string | null;
+  last_quality?: ReviewQuality | null;
+  collectionId?: string | null;
 }
-
-export type ReviewQuality = 'Again' | 'Hard' | 'Good' | 'Easy';
 
 export interface RepetitionStats {
   total: number;
@@ -61,220 +62,14 @@ export interface RepetitionStats {
   new_cards: number;
 }
 
-export interface DocumentChunk {
-  id: string;
-  content: string;
-  source_file: string;
-  page_number?: number;
-}
-
-// ── File System ─────────────────────────────────────────────────────
-
-export async function getWorkspaceFiles(directory?: string): Promise<StudyFile[]> {
-  return invoke('get_workspace_files', { directory });
-}
-
-export async function getAllFiles(): Promise<StudyFile[]> {
-  return invoke('get_all_files');
-}
-
-export async function saveFile(name: string, content: string, directory?: string): Promise<string> {
-  return invoke('save_file', { name, content, directory });
-}
-
-export async function readFile(relativePath: string): Promise<string> {
-  return invoke('read_file', { relativePath });
-}
-
-export async function deleteFile(relativePath: string): Promise<void> {
-  return invoke('delete_file', { relativePath });
-}
-
-export async function saveNote(name: string, content: string): Promise<string> {
-  return invoke('save_note', { name, content });
-}
-
-export async function readNote(name: string): Promise<string> {
-  return invoke('read_note', { name });
-}
-
-// ── AI ──────────────────────────────────────────────────────────────
-
-export async function aiChat(
-  messages: ChatMessage[],
-  taskType: TaskType,
-  context?: string,
-  model?: string
-): Promise<AIResponse> {
-  return invoke('ai_chat', { messages, taskType, context, model });
-}
-
-export async function aiExplain(content: string, subject?: string): Promise<AIResponse> {
-  return invoke('ai_explain', { content, subject });
-}
-
-export async function generateFlashcard(
-  content: string,
-  sourceFile?: string,
-  collectionId?: string
-): Promise<Flashcard[]> {
-  return invoke('generate_flashcard', { content, sourceFile, collectionId });
-}
-
-export async function addAIProvider(
-  providerType: string,
-  apiKey?: string,
-  endpoint?: string,
-  model?: string
-): Promise<void> {
-  const args: Record<string, unknown> = { providerType };
-  if (apiKey) args.apiKey = apiKey;
-  if (endpoint) args.endpoint = endpoint;
-  if (model) args.model = model;
-  return invoke('add_ai_provider', args);
-}
-
-export async function testAIProvider(): Promise<AIResponse> {
-  return invoke('test_ai_provider');
-}
-
-// ── Spaced Repetition ───────────────────────────────────────────────
-
-export async function getDueCards(): Promise<Flashcard[]> {
-  return invoke('get_due_cards');
-}
-
-export async function getAllFlashcards(): Promise<Flashcard[]> {
-  return invoke('get_all_flashcards');
-}
-
-export async function reviewFlashcard(cardId: string, quality: ReviewQuality): Promise<Flashcard> {
-  return invoke('review_flashcard', { cardId, quality });
-}
-
-export async function deleteFlashcard(cardId: string): Promise<void> {
-  return invoke('delete_flashcard', { cardId });
-}
-
-export async function deleteFlashcardsByCollection(collectionId: string): Promise<number> {
-  return invoke('delete_flashcards_by_collection', { collectionId });
-}
-
-export async function getFlashcardStats(): Promise<RepetitionStats> {
-  return invoke('get_flashcard_stats');
-}
-
-// ── Vector DB ───────────────────────────────────────────────────────
-
-export async function indexDocument(content: string, sourceFile: string): Promise<number> {
-  return invoke('index_document', { content, sourceFile });
-}
-
-export async function searchDocuments(query: string, limit?: number): Promise<DocumentChunk[]> {
-  return invoke('search_documents', { query, limit });
-}
-
-export async function getIndexStats(): Promise<number> {
-  return invoke('get_index_stats');
-}
-
-// ── Analytics ───────────────────────────────────────────────────────
-
-export interface StudyActivity {
-  id: string;
-  activity_type: string;
-  label: string;
-  duration_seconds: number;
-  metadata?: string;
-  timestamp: string;
-}
-
-export interface ExamResult {
-  id: string;
-  subject: string;
-  title: string;
-  score: number;
-  total: number;
-  percentage: number;
-  date: string;
-  notes?: string;
-}
-
 export interface StudyStats {
   total_study_minutes: number;
+  today_study_minutes: number;
   pomodoro_sessions: number;
+  today_pomodoro_sessions: number;
   flashcards_reviewed: number;
-  documents_read: number;
+  today_flashcards_reviewed: number;
   exams_taken: number;
-}
-
-export async function logStudyActivity(activity: StudyActivity): Promise<void> {
-  return invoke('log_study_activity', { activity });
-}
-
-export async function getStudyStats(): Promise<StudyStats> {
-  return invoke('get_study_stats');
-}
-
-export async function getTodayStudyMinutes(): Promise<number> {
-  return invoke('get_today_study_minutes');
-}
-
-export async function saveExamResult(exam: ExamResult): Promise<void> {
-  return invoke('save_exam_result', { exam });
-}
-
-export async function getExamResults(): Promise<ExamResult[]> {
-  return invoke('get_exam_results');
-}
-
-// ── New Persistence Commands ─────────────────────────────────────────
-
-export async function saveFlashcard(card: Flashcard): Promise<void> {
-  return invoke('save_flashcard', { card });
-}
-
-export async function saveExamData(examData: Record<string, unknown>): Promise<void> {
-  return invoke('save_exam_data', { examData });
-}
-
-export async function loadExamsData(): Promise<Record<string, unknown>[]> {
-  return invoke('load_exams_data');
-}
-
-export async function deleteExamData(examId: string): Promise<void> {
-  return invoke('delete_exam_data', { examId });
-}
-
-export async function logRecentDocument(doc: StudyFile): Promise<void> {
-  return invoke('log_recent_document', { doc });
-}
-
-export async function getRecentDocuments(): Promise<StudyFile[]> {
-  return invoke('get_recent_documents');
-}
-
-export async function deleteWorkspaceFile(relativePath: string): Promise<void> {
-  return invoke('delete_workspace_file', { relativePath });
-}
-
-export async function getAIProviders(): Promise<{ type: string; model_name: string; model: string; configured: boolean; active: boolean; endpoint?: string }[]> {
-  return invoke('get_ai_providers');
-}
-
-export async function removeAIProvider(providerType: string, model?: string): Promise<void> {
-  if (model) {
-    return invoke('remove_ai_provider_model', { providerType, model });
-  }
-  return invoke('remove_ai_provider', { providerType });
-}
-
-export async function setDefaultAIProvider(providerType: string): Promise<void> {
-  return invoke('set_default_ai_provider', { providerType });
-}
-
-export async function checkOllama(): Promise<{ available: boolean }> {
-  return invoke('check_ollama');
 }
 
 export interface CollectionEntry {
@@ -285,102 +80,182 @@ export interface CollectionEntry {
   review_period_days: number;
 }
 
-export async function saveCollections(collections: CollectionEntry[]): Promise<void> {
-  return invoke('save_collections', { collections });
+export interface GenerationProgress {
+  request_id: string;
+  current: number;
+  total: number;
+  preview: string;
+  generated: number;
 }
 
-export async function restoreAllFlashcards(periodDays?: number): Promise<void> {
-  return invoke('restore_all_flashcards', { periodDays });
+export type WriteTarget = { path: string } | { dir: string; name: string; unique?: boolean };
+
+export function isTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-export async function getCardsByFilter(
-  due: boolean, newCards: boolean, young: boolean, mature: boolean
-): Promise<Flashcard[]> {
-  return invoke('get_cards_by_filter', { due, newCards, young, mature });
-}
-
-export async function checkDueFlashcards(): Promise<number> {
-  return invoke('check_due_flashcards');
-}
-
-// ── Notifications (Web API) ──────────────────────────────────────────
-
-export async function sendStudyNotification(title: string, body: string) {
-  if (!('Notification' in window)) return;
-  if (Notification.permission === 'granted') {
-    new Notification(title, { body, icon: '/favicon.ico' });
-  } else if (Notification.permission !== 'denied') {
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      new Notification(title, { body, icon: '/favicon.ico' });
-    }
+export function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object' && 'message' in error) return String((error as { message: unknown }).message);
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
   }
 }
 
-export function requestNotificationPermission() {
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission();
+let exclusiveCommand: string | null = null;
+
+export function reserveCommands(command: string | null): void {
+  exclusiveCommand = command;
+}
+
+async function call<T>(command: string, args?: InvokeArgs): Promise<T> {
+  if (!isTauri()) throw new Error('This feature needs the Annotate Studio desktop app.');
+  if (exclusiveCommand !== null && command !== exclusiveCommand) {
+    throw new Error('Annotate Studio is restoring a backup. Please wait a moment.');
+  }
+  try {
+    return await invoke<T>(command, args);
+  } catch (error) {
+    throw new Error(errorMessage(error));
   }
 }
 
-export async function loadCollections(): Promise<CollectionEntry[]> {
-  return invoke('load_collections');
+function toBytes(value: unknown): Uint8Array {
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (Array.isArray(value)) return Uint8Array.from(value as number[]);
+  throw new Error('Unexpected binary response');
 }
 
-// ── Chat Sessions ────────────────────────────────────────────────────────
+export const listWorkspaceFiles = () => call<StudyFile[]>('list_workspace_files');
+export const statWorkspaceFile = (path: string) => call<StudyFile | null>('stat_workspace_file', { path });
+export const readTextFile = (path: string) => call<string>('read_text_file', { path });
 
-export async function saveChatSessions(sessions: Record<string, unknown>[]): Promise<void> {
-  return invoke('save_chat_sessions', { sessions });
+export interface NoteText {
+  content: string;
+  editable: boolean;
 }
 
-export async function loadChatSessions(): Promise<Record<string, unknown>[]> {
-  return invoke('load_chat_sessions');
+export const readNote = (path: string) => call<NoteText>('read_note', { path });
+export const writeTextFile = (path: string, content: string) => call<StudyFile>('write_text_file', { path, content });
+export const createNote = (name: string, content: string) => call<StudyFile>('create_note', { name, content });
+export const renameWorkspaceFile = (path: string, newName: string) =>
+  call<StudyFile>('rename_workspace_file', { path, newName });
+export const deleteWorkspaceFile = (path: string) => call<void>('delete_workspace_file', { path });
+export const importFiles = (paths: string[]) => call<StudyFile[]>('import_files', { paths });
+
+export async function readFileBytes(path: string): Promise<Uint8Array> {
+  return toBytes(await call<unknown>('read_file_bytes', { path }));
 }
 
-export async function saveMotivationSessions(sessions: Record<string, unknown>[]): Promise<void> {
-  return invoke('save_motivation_sessions', { sessions });
+export async function writeFileBytes(target: WriteTarget, data: Uint8Array | ArrayBuffer): Promise<StudyFile> {
+  const header = new TextEncoder().encode(JSON.stringify(target));
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const frame = new Uint8Array(4 + header.length + bytes.length);
+  new DataView(frame.buffer).setUint32(0, header.length, true);
+  frame.set(header, 4);
+  frame.set(bytes, 4 + header.length);
+  return call<StudyFile>('write_file_bytes', frame);
 }
 
-export async function loadMotivationSessions(): Promise<Record<string, unknown>[]> {
-  return invoke('load_motivation_sessions');
+export const getDataDir = () => call<string>('get_data_dir');
+export const loadCanvasState = () => call<unknown>('load_canvas_state');
+export const saveCanvasState = (canvas: unknown) => call<void>('save_canvas_state', { canvas });
+export const loadSettings = () => call<unknown>('load_settings');
+export const saveSettings = (settings: unknown) => call<void>('save_settings', { settings });
+export const loadExams = () => call<unknown[]>('load_exams');
+export const saveExams = (exams: unknown[]) => call<void>('save_exams', { exams });
+export const loadCollections = () => call<CollectionEntry[]>('load_collections');
+export const saveCollections = (collections: CollectionEntry[]) => call<void>('save_collections', { collections });
+export const loadChatSessions = () => call<unknown[]>('load_chat_sessions');
+export const saveChatSessions = (sessions: unknown[]) => call<void>('save_chat_sessions', { sessions });
+export const loadMotivationSessions = () => call<unknown[]>('load_motivation_sessions');
+export const saveMotivationSessions = (sessions: unknown[]) => call<void>('save_motivation_sessions', { sessions });
+
+export const logStudyActivity = (activityType: string, label: string, durationSeconds: number, metadata?: string) =>
+  call<void>('log_study_activity', { activityType, label, durationSeconds: Math.max(0, Math.round(durationSeconds)), metadata });
+export const getStudyStats = () => call<StudyStats>('get_study_stats');
+
+
+export const getFlashcards = () => call<Flashcard[]>('get_flashcards');
+export const getFlashcardStats = () => call<RepetitionStats>('get_flashcard_stats');
+export const countDueFlashcards = () => call<number>('count_due_flashcards');
+export const createFlashcard = (front: string, back: string, collectionId?: string | null, sourceFile?: string) =>
+  call<Flashcard>('create_flashcard', { front, back, collectionId: collectionId ?? null, sourceFile });
+export const updateFlashcard = (id: string, front: string, back: string, collectionId?: string | null) =>
+  call<Flashcard>('update_flashcard', { id, front, back, collectionId: collectionId ?? null });
+export const reviewFlashcard = (cardId: string, quality: ReviewQuality) => call<Flashcard>('review_flashcard', { cardId, quality });
+export const deleteFlashcard = (cardId: string) => call<boolean>('delete_flashcard', { cardId });
+export const deleteFlashcardsByCollection = (collectionId: string) =>
+  call<number>('delete_flashcards_by_collection', { collectionId });
+export const resetFlashcards = (collectionId?: string | null, periodDays?: number) =>
+  call<number>('reset_flashcards', { collectionId: collectionId ?? null, periodDays });
+
+export interface ChatOptions {
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
 }
 
-// ── Canvas ──────────────────────────────────────────────────────────────
+export const aiChat = (messages: ChatMessagePayload[], options: ChatOptions = {}) =>
+  call<AIResponse>('ai_chat', {
+    messages,
+    model: options.model || null,
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
+  });
 
-export async function saveFileBinary(name: string, base64Content: string, directory: string): Promise<string> {
-  return invoke('save_file_binary', { name, base64Content, directory });
+export interface GenerateOptions {
+  collectionId?: string | null;
+  model?: string;
+  instructions?: string;
+  requestId?: string;
 }
 
-export async function readFileBase64(relativePath: string): Promise<string> {
-  return invoke('read_file_base64', { relativePath });
+export const generateFlashcards = (content: string, sourceFile: string | undefined, options: GenerateOptions = {}) =>
+  call<Flashcard[]>('generate_flashcards', {
+    content,
+    sourceFile,
+    collectionId: options.collectionId ?? null,
+    model: options.model || null,
+    instructions: options.instructions || null,
+    requestId: options.requestId ?? null,
+  });
+
+export const generateFlashcardsFromFile = (path: string, options: GenerateOptions = {}) =>
+  call<Flashcard[]>('generate_flashcards_from_file', {
+    path,
+    collectionId: options.collectionId ?? null,
+    model: options.model || null,
+    instructions: options.instructions || null,
+    requestId: options.requestId ?? null,
+  });
+
+export const cancelGeneration = (requestId?: string) => call<void>('cancel_generation', { requestId: requestId ?? null });
+
+export function onGenerationProgress(handler: (progress: GenerationProgress) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return Promise.resolve(() => {});
+  return listen<GenerationProgress>('flashcard-generation-progress', (event) => handler(event.payload));
 }
 
-export async function saveCanvasState(json: string): Promise<void> {
-  return invoke('save_canvas_state', { json });
-}
+export const getAIProviders = () => call<ProviderInfo[]>('get_ai_providers');
+export const addAIProvider = (providerType: string, apiKey?: string, endpoint?: string, model?: string, makeDefault?: boolean) =>
+  call<ProviderInfo[]>('add_ai_provider', {
+    providerType,
+    apiKey: apiKey || null,
+    endpoint: endpoint || null,
+    model: model || null,
+    makeDefault: makeDefault ?? false,
+  });
+export const removeAIProvider = (providerType: string, model?: string) =>
+  call<ProviderInfo[]>('remove_ai_provider', { providerType, model: model ?? null });
+export const setDefaultAIProvider = (providerType: string, model?: string) =>
+  call<ProviderInfo[]>('set_default_ai_provider', { providerType, model: model ?? null });
+export const testAIProvider = (model?: string) => call<AIResponse>('test_ai_provider', { model: model || null });
+export const checkOllama = (endpoint?: string) => call<boolean>('check_ollama', { endpoint: endpoint || null });
 
-export async function loadCanvasState(): Promise<string> {
-  return invoke('load_canvas_state');
-}
-
-// ── Import / Export ────────────────────────────────────────────────
-
-export async function generateFlashcardsChunked(sourceFile: string, collectionId?: string): Promise<Flashcard[]> {
-  return invoke('generate_flashcards_chunked', { sourceFile, collectionId });
-}
-
-export async function exportData(outputPath: string): Promise<string> {
-  return invoke('export_data', { outputPath });
-}
-
-export async function saveCardQualities(data: string): Promise<void> {
-  return invoke('save_card_qualities', { data });
-}
-
-export async function loadCardQualities(): Promise<string> {
-  return invoke('load_card_qualities');
-}
-
-export async function importData(archivePath: string): Promise<string> {
-  return invoke('import_data', { archivePath });
-}
+export const exportData = (outputPath: string) => call<number>('export_data', { outputPath });
+export const importData = (archivePath: string) => call<number>('import_data', { archivePath });
