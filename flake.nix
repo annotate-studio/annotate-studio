@@ -17,8 +17,11 @@
 
         rustTools = with pkgs; [
           cargo
+          rustc
           rust-analyzer-unwrapped
           cargo-tauri
+          nodejs_22
+          yarn
         ];
 
         nativeLibs = with pkgs; [
