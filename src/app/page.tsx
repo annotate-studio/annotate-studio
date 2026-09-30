@@ -1,54 +1,57 @@
 'use client';
 
+import React from 'react';
 import dynamic from 'next/dynamic';
+import TitleBar from '@/components/layout/TitleBar';
 import Sidebar from '@/components/layout/Sidebar';
+import Toaster from '@/components/ui/Toaster';
+import DialogHost from '@/components/ui/DialogHost';
+import ContextMenuHost from '@/components/ui/ContextMenu';
+import { useAppEngines } from '@/components/app/useAppEngines';
+import { useApp } from '@/store/app';
+import { cn } from '@/lib/utils';
 
-const TitleBar = dynamic(() => import('@/components/layout/TitleBar'), { ssr: false });
-import CanvasZone from '@/components/canvas/CanvasZone';
-import ChatbotZone from '@/components/chatbot/ChatbotZone';
-import FlashcardsTab from '@/components/study/FlashcardsTab';
-import ExamsTab from '@/components/study/ExamsTab';
-import PomodoroTab from '@/components/study/PomodoroTab';
-import MotivationTab from '@/components/study/MotivationTab';
-import SettingsTab from '@/components/study/SettingsTab';
-import { useStore } from '@/lib/store';
-import { useEffect, useRef } from 'react';
+const CanvasZone = dynamic(() => import('@/components/canvas/CanvasZone'), { ssr: false });
+const ChatPanel = dynamic(() => import('@/components/chatbot/ChatPanel'), { ssr: false });
+const LibraryTab = dynamic(() => import('@/components/study/LibraryTab'), { ssr: false });
+const FlashcardsTab = dynamic(() => import('@/components/study/flashcards/FlashcardsTab'), { ssr: false });
+const ExamsTab = dynamic(() => import('@/components/study/exams/ExamsTab'), { ssr: false });
+const PomodoroTab = dynamic(() => import('@/components/study/PomodoroTab'), { ssr: false });
+const MotivationTab = dynamic(() => import('@/components/study/MotivationTab'), { ssr: false });
+const SettingsTab = dynamic(() => import('@/components/study/SettingsTab'), { ssr: false });
 
 export default function Home() {
-  const { currentView, loadSettingsFromDisk } = useStore();
-  const loadedRef = useRef(false);
-
-  useEffect(() => {
-    if (loadedRef.current) return;
-    loadedRef.current = true;
-    loadSettingsFromDisk();
-  }, [loadSettingsFromDisk]);
-
-  const isCanvas = currentView === 'canvas';
+  useAppEngines();
+  const view = useApp((state) => state.currentView);
+  const onCanvas = view === 'canvas';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw' }}>
+    <div className="app">
       <TitleBar />
-      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+      <div className="app-body">
         <Sidebar />
-        <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-          {/* CanvasZone is ALWAYS mounted to preserve PDF/viewer state */}
-          <div style={{ position: 'absolute', inset: 0, visibility: isCanvas ? 'visible' : 'hidden', pointerEvents: isCanvas ? 'auto' : 'none' }}>
-            <CanvasZone />
-          </div>
-          {/* Other views render on top when active */}
-          {!isCanvas && (
-            <div style={{ position: 'absolute', inset: 0, overflow: 'auto' }}>
-              {currentView === 'flashcards' && <FlashcardsTab />}
-              {currentView === 'exams' && <ExamsTab />}
-              {currentView === 'pomodoro' && <PomodoroTab />}
-              {currentView === 'motivation' && <MotivationTab />}
-              {currentView === 'settings' && <SettingsTab />}
+        <main className="app-main">
+          <div className="view-stack">
+            <div className={cn('view', onCanvas ? 'view-visible' : 'view-hidden')} aria-hidden={!onCanvas}>
+              <CanvasZone />
             </div>
-          )}
-          {isCanvas && <ChatbotZone />}
+            {!onCanvas && (
+              <div className="view view-visible view-scroll">
+                {view === 'library' && <LibraryTab />}
+                {view === 'flashcards' && <FlashcardsTab />}
+                {view === 'exams' && <ExamsTab />}
+                {view === 'pomodoro' && <PomodoroTab />}
+                {view === 'motivation' && <MotivationTab />}
+                {view === 'settings' && <SettingsTab />}
+              </div>
+            )}
+          </div>
+          <ChatPanel visible={onCanvas} />
         </main>
       </div>
+      <Toaster />
+      <DialogHost />
+      <ContextMenuHost />
     </div>
   );
 }
