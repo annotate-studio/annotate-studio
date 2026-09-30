@@ -1,25 +1,18 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Flashcard {
-    pub id: String,
-    pub front: String,
-    pub back: String,
-    pub source_file: Option<String>,
-    pub source_context: Option<String>,
-    pub ease_factor: f64,
-    pub interval_days: i32,
-    pub repetitions: i32,
-    pub next_review: String,
-    pub created_at: String,
-    pub last_reviewed: Option<String>,
-    #[serde(rename = "collectionId")]
-    pub collection_id: Option<String>,
-}
+use crate::storage::{read_json_or_default, write_json};
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+const MIN_EASE: f64 = 1.3;
+const MAX_EASE: f64 = 5.0;
+const DEFAULT_EASE: f64 = 2.5;
+const MAX_INTERVAL_DAYS: i32 = 36_500;
+const MATURE_INTERVAL_DAYS: i32 = 21;
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum ReviewQuality {
     Again,
     Hard,
@@ -27,15 +20,54 @@ pub enum ReviewQuality {
     Easy,
 }
 
-impl ReviewQuality {
-    pub fn score(&self) -> f64 {
-        match self {
-            ReviewQuality::Again => 0.0,
-            ReviewQuality::Hard => 2.0,
-            ReviewQuality::Good => 3.0,
-            ReviewQuality::Easy => 4.0,
-        }
-    }
+fn default_ease() -> f64 {
+    DEFAULT_EASE
+}
+
+fn now_rfc3339() -> String {
+    Utc::now().to_rfc3339()
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Flashcard {
+    pub id: String,
+    pub front: String,
+    pub back: String,
+    #[serde(default)]
+    pub source_file: Option<String>,
+    #[serde(default)]
+    pub source_context: Option<String>,
+    #[serde(default = "default_ease")]
+    pub ease_factor: f64,
+    #[serde(default)]
+    pub interval_days: i32,
+    #[serde(default)]
+    pub repetitions: i32,
+    #[serde(default)]
+    pub lapses: i32,
+    #[serde(default = "now_rfc3339")]
+    pub next_review: String,
+    #[serde(default = "now_rfc3339")]
+    pub created_at: String,
+    #[serde(default)]
+    pub last_reviewed: Option<String>,
+    #[serde(default)]
+    pub last_quality: Option<ReviewQuality>,
+    #[serde(rename = "collectionId", default)]
+    pub collection_id: Option<String>,
+}
+
+fn grow(previous: i32, factor: f64) -> i32 {
+    let previous = previous.clamp(0, MAX_INTERVAL_DAYS);
+    let scaled = (previous.max(1) as f64 * factor)
+        .round()
+        .min(MAX_INTERVAL_DAYS as f64) as i32;
+    scaled.max(previous + 1).min(MAX_INTERVAL_DAYS)
+}
+
+fn after_delay(now: DateTime<Utc>, delay: Duration) -> DateTime<Utc> {
+    now.checked_add_signed(delay)
+        .unwrap_or(DateTime::<Utc>::MAX_UTC)
 }
 
 impl Flashcard {
@@ -43,212 +75,443 @@ impl Flashcard {
         front: String,
         back: String,
         source_file: Option<String>,
-        source_context: Option<String>,
+        collection_id: Option<String>,
     ) -> Self {
-        let now = Utc::now();
+        let now = Utc::now().to_rfc3339();
         Self {
             id: Uuid::new_v4().to_string(),
             front,
             back,
             source_file,
-            source_context,
-            ease_factor: 2.5,
-            interval_days: 1,
+            source_context: None,
+            ease_factor: DEFAULT_EASE,
+            interval_days: 0,
             repetitions: 0,
-            next_review: now.to_rfc3339(),
-            created_at: now.to_rfc3339(),
+            lapses: 0,
+            next_review: now.clone(),
+            created_at: now,
             last_reviewed: None,
-            collection_id: None,
+            last_quality: None,
+            collection_id,
         }
     }
 
-    /// SM-2 spaced repetition algorithm
-    pub fn review(&mut self, quality: &ReviewQuality) {
-        let quality_score = quality.score();
+    pub fn is_new(&self) -> bool {
+        self.last_reviewed.is_none() && self.repetitions == 0
+    }
 
-        self.repetitions += 1;
-        self.last_reviewed = Some(Utc::now().to_rfc3339());
+    pub fn due_at(&self) -> Option<DateTime<Utc>> {
+        DateTime::parse_from_rfc3339(&self.next_review)
+            .ok()
+            .map(|date| date.with_timezone(&Utc))
+    }
 
-        if quality_score < 2.0 {
-            // Failed — reset interval
-            self.repetitions = 0;
-            self.interval_days = 1;
-        } else {
-            match self.repetitions {
-                1 => self.interval_days = 1,
-                2 => self.interval_days = 6,
-                _ => {
-                    self.interval_days =
-                        (self.interval_days as f64 * self.ease_factor).round() as i32;
-                }
+    pub fn is_due_at(&self, now: DateTime<Utc>) -> bool {
+        self.due_at().map(|due| due <= now).unwrap_or(true)
+    }
+
+    pub fn review_at(&mut self, quality: ReviewQuality, now: DateTime<Utc>) {
+        let previous = self.interval_days.clamp(0, MAX_INTERVAL_DAYS);
+        if !self.ease_factor.is_finite() {
+            self.ease_factor = DEFAULT_EASE;
+        }
+        self.ease_factor = self.ease_factor.clamp(MIN_EASE, MAX_EASE);
+        self.repetitions = self.repetitions.max(0);
+        let delay = match quality {
+            ReviewQuality::Again => {
+                self.lapses = self.lapses.saturating_add(1);
+                self.repetitions = 0;
+                self.ease_factor = (self.ease_factor - 0.2).max(MIN_EASE);
+                self.interval_days = 0;
+                Duration::minutes(10)
             }
-        }
-
-        // Update ease factor (SM-2 formula)
-        self.ease_factor =
-            self.ease_factor + (0.1 - (3.0 - quality_score) * (0.08 + (3.0 - quality_score) * 0.02));
-
-        if self.ease_factor < 1.3 {
-            self.ease_factor = 1.3;
-        }
-
-        self.next_review =
-            (Utc::now() + chrono::Duration::days(self.interval_days as i64)).to_rfc3339();
+            ReviewQuality::Hard => {
+                self.ease_factor = (self.ease_factor - 0.15).max(MIN_EASE);
+                self.interval_days = if self.repetitions == 0 {
+                    1
+                } else {
+                    grow(previous, 1.2)
+                };
+                self.repetitions = self.repetitions.saturating_add(1);
+                Duration::days(self.interval_days as i64)
+            }
+            ReviewQuality::Good => {
+                self.interval_days = match self.repetitions {
+                    0 => 1,
+                    1 => 6.max(previous + 1).min(MAX_INTERVAL_DAYS),
+                    _ => grow(previous, self.ease_factor),
+                };
+                self.repetitions = self.repetitions.saturating_add(1);
+                Duration::days(self.interval_days as i64)
+            }
+            ReviewQuality::Easy => {
+                self.interval_days = match self.repetitions {
+                    0 => 4,
+                    1 => 8.max(previous + 1).min(MAX_INTERVAL_DAYS),
+                    _ => grow(previous, self.ease_factor * 1.3),
+                };
+                self.ease_factor = (self.ease_factor + 0.15).min(MAX_EASE);
+                self.repetitions = self.repetitions.saturating_add(1);
+                Duration::days(self.interval_days as i64)
+            }
+        };
+        self.last_reviewed = Some(now.to_rfc3339());
+        self.last_quality = Some(quality);
+        self.next_review = after_delay(now, delay).to_rfc3339();
     }
 
-    pub fn is_due(&self) -> bool {
-        if let Ok(next) = DateTime::parse_from_rfc3339(&self.next_review) {
-            next <= Utc::now()
-        } else {
-            true
-        }
+    pub fn reset(&mut self, due: DateTime<Utc>) {
+        self.ease_factor = DEFAULT_EASE;
+        self.interval_days = 0;
+        self.repetitions = 0;
+        self.lapses = 0;
+        self.last_reviewed = None;
+        self.last_quality = None;
+        self.next_review = due.to_rfc3339();
     }
 }
 
-pub struct SpacedRepetitionEngine {
-    cards: Vec<Flashcard>,
-    persist_path: Option<std::path::PathBuf>,
-}
-
-impl SpacedRepetitionEngine {
-    pub fn new() -> Self {
-        Self { cards: Vec::new(), persist_path: None }
-    }
-
-    pub fn with_cards(cards: Vec<Flashcard>) -> Self {
-        Self { cards, persist_path: None }
-    }
-
-    pub fn with_persistence(mut self, path: std::path::PathBuf) -> Self {
-        if let Ok(Some(cards)) = Self::load_from_disk(&path) {
-            self.cards = cards;
-        }
-        self.persist_path = Some(path);
-        self
-    }
-
-    fn load_from_disk(path: &std::path::Path) -> Result<Option<Vec<Flashcard>>, String> {
-        if !path.exists() { return Ok(None); }
-        let data = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&data).map(Some).map_err(|e| e.to_string())
-    }
-
-    pub fn save(&self) {
-        self.save_to_disk();
-    }
-
-    fn save_to_disk(&self) {
-        if let Some(ref path) = self.persist_path {
-            if let Ok(json) = serde_json::to_string_pretty(&self.cards) {
-                std::fs::write(path, json).ok();
-            }
-        }
-    }
-
-    pub fn add_card(&mut self, card: Flashcard) {
-        self.cards.push(card);
-        self.save_to_disk();
-    }
-
-    pub fn set_cards(&mut self, cards: Vec<Flashcard>) {
-        self.cards = cards;
-        self.save_to_disk();
-    }
-
-    pub fn remove_card(&mut self, id: &str) -> bool {
-        let len_before = self.cards.len();
-        self.cards.retain(|c| c.id != id);
-        let removed = self.cards.len() < len_before;
-        if removed { self.save_to_disk(); }
-        removed
-    }
-
-    pub fn remove_cards_by_collection(&mut self, collection_id: &str) -> usize {
-        let len_before = self.cards.len();
-        let target = if collection_id == "default" { None } else { Some(collection_id.to_string()) };
-        self.cards.retain(|c| c.collection_id != target);
-        let removed = len_before - self.cards.len();
-        if removed > 0 { self.save_to_disk(); }
-        removed
-    }
-
-    pub fn due_cards(&self) -> Vec<&Flashcard> {
-        self.cards.iter().filter(|c| c.is_due()).collect()
-    }
-
-    pub fn get_card(&self, id: &str) -> Option<&Flashcard> {
-        self.cards.iter().find(|c| c.id == id)
-    }
-
-    pub fn get_card_mut(&mut self, id: &str) -> Option<&mut Flashcard> {
-        self.cards.iter_mut().find(|c| c.id == id)
-    }
-
-    pub fn all_cards(&self) -> &[Flashcard] {
-        &self.cards
-    }
-
-    pub fn restore_all(&mut self, period_days: Option<f64>) {
-        let now = Utc::now();
-        for card in &mut self.cards {
-            card.repetitions = 0;
-            card.interval_days = 1;
-            card.ease_factor = 2.5;
-            card.last_reviewed = None;
-            if let Some(days) = period_days {
-                let secs = (days * 86400.0) as i64;
-                card.next_review = (now + chrono::Duration::seconds(secs)).to_rfc3339();
-            } else {
-                card.next_review = now.to_rfc3339();
-            }
-        }
-        self.save_to_disk();
-    }
-
-    pub fn cards_by_filter(&self, due: bool, new_cards: bool, young: bool, mature: bool) -> Vec<&Flashcard> {
-        self.cards.iter().filter(|c| {
-            if due && c.is_due() { return true; }
-            if new_cards && c.repetitions == 0 { return true; }
-            if young && c.interval_days >= 1 && c.interval_days < 21 { return true; }
-            if mature && c.interval_days >= 21 { return true; }
-            false
-        }).collect()
-    }
-
-    pub fn due_count(&self) -> usize {
-        self.due_cards().len()
-    }
-
-    pub fn stats(&self) -> RepetitionStats {
-        let total = self.cards.len();
-        let due = self.due_cards().len();
-        let mature = self
-            .cards
-            .iter()
-            .filter(|c| c.interval_days >= 21)
-            .count();
-        let young = self
-            .cards
-            .iter()
-            .filter(|c| c.interval_days >= 1 && c.interval_days < 21)
-            .count();
-        let new_cards = self.cards.iter().filter(|c| c.repetitions == 0).count();
-
-        RepetitionStats {
-            total,
-            due,
-            mature,
-            young,
-            new_cards,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, PartialEq, Eq)]
 pub struct RepetitionStats {
     pub total: usize,
     pub due: usize,
     pub mature: usize,
     pub young: usize,
     pub new_cards: usize,
+}
+
+#[derive(Default)]
+pub struct SpacedRepetitionEngine {
+    cards: Vec<Flashcard>,
+    persist_path: Option<PathBuf>,
+}
+
+impl SpacedRepetitionEngine {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_cards(cards: Vec<Flashcard>) -> Self {
+        Self {
+            cards,
+            persist_path: None,
+        }
+    }
+
+    pub fn load(path: PathBuf) -> Self {
+        let cards: Vec<Flashcard> = read_json_or_default(&path);
+        Self {
+            cards,
+            persist_path: Some(path),
+        }
+    }
+
+    pub fn reload(&mut self) {
+        if let Some(path) = &self.persist_path {
+            self.cards = read_json_or_default(path);
+        }
+    }
+
+    fn persist(&self) -> Result<(), String> {
+        match &self.persist_path {
+            Some(path) => write_json(path, &self.cards),
+            None => Ok(()),
+        }
+    }
+
+    pub fn cards(&self) -> &[Flashcard] {
+        &self.cards
+    }
+
+    pub fn get(&self, id: &str) -> Option<&Flashcard> {
+        self.cards.iter().find(|card| card.id == id)
+    }
+
+    pub fn add_cards(&mut self, cards: Vec<Flashcard>) -> Result<(), String> {
+        if cards.is_empty() {
+            return Ok(());
+        }
+        self.cards.extend(cards);
+        self.persist()
+    }
+
+    pub fn upsert(&mut self, card: Flashcard) -> Result<(), String> {
+        match self
+            .cards
+            .iter_mut()
+            .find(|existing| existing.id == card.id)
+        {
+            Some(existing) => *existing = card,
+            None => self.cards.push(card),
+        }
+        self.persist()
+    }
+
+    pub fn update_content(
+        &mut self,
+        id: &str,
+        front: String,
+        back: String,
+        collection_id: Option<Option<String>>,
+    ) -> Result<Flashcard, String> {
+        let card = self
+            .cards
+            .iter_mut()
+            .find(|card| card.id == id)
+            .ok_or_else(|| "Flashcard not found".to_string())?;
+        card.front = front;
+        card.back = back;
+        if let Some(collection) = collection_id {
+            card.collection_id = collection;
+        }
+        let updated = card.clone();
+        self.persist()?;
+        Ok(updated)
+    }
+
+    pub fn review(
+        &mut self,
+        id: &str,
+        quality: ReviewQuality,
+        now: DateTime<Utc>,
+    ) -> Result<Flashcard, String> {
+        let card = self
+            .cards
+            .iter_mut()
+            .find(|card| card.id == id)
+            .ok_or_else(|| "Flashcard not found".to_string())?;
+        card.review_at(quality, now);
+        let updated = card.clone();
+        self.persist()?;
+        Ok(updated)
+    }
+
+    pub fn remove(&mut self, id: &str) -> Result<bool, String> {
+        let before = self.cards.len();
+        self.cards.retain(|card| card.id != id);
+        let removed = self.cards.len() < before;
+        if removed {
+            self.persist()?;
+        }
+        Ok(removed)
+    }
+
+    pub fn remove_collection(&mut self, collection_id: &str) -> Result<usize, String> {
+        let before = self.cards.len();
+        self.cards
+            .retain(|card| card.collection_id.as_deref() != Some(collection_id));
+        let removed = before - self.cards.len();
+        if removed > 0 {
+            self.persist()?;
+        }
+        Ok(removed)
+    }
+
+    pub fn reset(
+        &mut self,
+        collection_id: Option<&str>,
+        period_days: Option<f64>,
+        now: DateTime<Utc>,
+    ) -> Result<usize, String> {
+        let offset_seconds = period_days
+            .filter(|days| days.is_finite() && *days > 0.0)
+            .map(|days| (days.min(MAX_INTERVAL_DAYS as f64) * 86_400.0) as i64)
+            .unwrap_or(0);
+        let due = after_delay(now, Duration::seconds(offset_seconds));
+        let mut count = 0;
+        for card in self
+            .cards
+            .iter_mut()
+            .filter(|card| collection_id.is_none_or(|id| card.collection_id.as_deref() == Some(id)))
+        {
+            card.reset(due);
+            count += 1;
+        }
+        if count > 0 {
+            self.persist()?;
+        }
+        Ok(count)
+    }
+
+    pub fn apply_legacy_qualities(
+        &mut self,
+        qualities: HashMap<String, ReviewQuality>,
+    ) -> Result<usize, String> {
+        let mut applied = 0;
+        for card in self.cards.iter_mut() {
+            if card.last_quality.is_none() {
+                if let Some(quality) = qualities.get(&card.id) {
+                    card.last_quality = Some(*quality);
+                    applied += 1;
+                }
+            }
+        }
+        if applied > 0 {
+            self.persist()?;
+        }
+        Ok(applied)
+    }
+
+    pub fn due_count(&self, now: DateTime<Utc>) -> usize {
+        self.cards.iter().filter(|card| card.is_due_at(now)).count()
+    }
+
+    pub fn stats(&self, now: DateTime<Utc>) -> RepetitionStats {
+        let mut stats = RepetitionStats {
+            total: self.cards.len(),
+            ..Default::default()
+        };
+        for card in &self.cards {
+            if card.is_due_at(now) {
+                stats.due += 1;
+            }
+            if card.is_new() {
+                stats.new_cards += 1;
+            } else if card.interval_days >= MATURE_INTERVAL_DAYS {
+                stats.mature += 1;
+            } else {
+                stats.young += 1;
+            }
+        }
+        stats
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn card() -> Flashcard {
+        Flashcard::new("Q".into(), "A".into(), None, None)
+    }
+
+    #[test]
+    fn good_reviews_follow_sm2_intervals() {
+        let now = Utc::now();
+        let mut c = card();
+        c.review_at(ReviewQuality::Good, now);
+        assert_eq!(c.interval_days, 1);
+        c.review_at(ReviewQuality::Good, now);
+        assert_eq!(c.interval_days, 6);
+        c.review_at(ReviewQuality::Good, now);
+        assert_eq!(c.interval_days, 15);
+        assert!((c.ease_factor - DEFAULT_EASE).abs() < f64::EPSILON);
+        assert!(!c.is_due_at(now));
+    }
+
+    #[test]
+    fn again_resets_and_lowers_ease() {
+        let now = Utc::now();
+        let mut c = card();
+        c.review_at(ReviewQuality::Good, now);
+        c.review_at(ReviewQuality::Good, now);
+        c.review_at(ReviewQuality::Again, now);
+        assert_eq!(c.repetitions, 0);
+        assert_eq!(c.interval_days, 0);
+        assert_eq!(c.lapses, 1);
+        assert!(c.ease_factor < DEFAULT_EASE);
+        assert!(c.is_due_at(now + Duration::minutes(11)));
+        assert!(!c.is_new());
+    }
+
+    #[test]
+    fn ease_never_drops_below_minimum() {
+        let now = Utc::now();
+        let mut c = card();
+        for _ in 0..20 {
+            c.review_at(ReviewQuality::Again, now);
+        }
+        assert!((c.ease_factor - MIN_EASE).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn easy_grows_faster_than_good_and_hard_slower() {
+        let now = Utc::now();
+        let mut base = card();
+        base.review_at(ReviewQuality::Good, now);
+        base.review_at(ReviewQuality::Good, now);
+        let mut hard = base.clone();
+        let mut good = base.clone();
+        let mut easy = base.clone();
+        hard.review_at(ReviewQuality::Hard, now);
+        good.review_at(ReviewQuality::Good, now);
+        easy.review_at(ReviewQuality::Easy, now);
+        assert!(hard.interval_days < good.interval_days);
+        assert!(good.interval_days < easy.interval_days);
+    }
+
+    #[test]
+    fn stats_classify_cards() {
+        let now = Utc::now();
+        let mut engine = SpacedRepetitionEngine::with_cards(vec![card(), card(), card()]);
+        let ids: Vec<String> = engine.cards().iter().map(|c| c.id.clone()).collect();
+        engine.review(&ids[0], ReviewQuality::Good, now).unwrap();
+        let mut mature = engine.get(&ids[1]).unwrap().clone();
+        mature.interval_days = 30;
+        mature.repetitions = 5;
+        mature.last_reviewed = Some(now.to_rfc3339());
+        mature.next_review = (now + Duration::days(30)).to_rfc3339();
+        engine.upsert(mature).unwrap();
+        let stats = engine.stats(now + Duration::seconds(1));
+        assert_eq!(
+            stats,
+            RepetitionStats {
+                total: 3,
+                due: 1,
+                mature: 1,
+                young: 1,
+                new_cards: 1
+            }
+        );
+    }
+
+    #[test]
+    fn reset_is_scoped_to_collection() {
+        let now = Utc::now();
+        let mut a = card();
+        a.collection_id = Some("a".into());
+        let mut b = card();
+        b.collection_id = Some("b".into());
+        let mut engine = SpacedRepetitionEngine::with_cards(vec![a, b]);
+        let ids: Vec<String> = engine.cards().iter().map(|c| c.id.clone()).collect();
+        engine.review(&ids[0], ReviewQuality::Easy, now).unwrap();
+        engine.review(&ids[1], ReviewQuality::Easy, now).unwrap();
+        assert_eq!(engine.reset(Some("a"), None, now).unwrap(), 1);
+        assert!(engine.get(&ids[0]).unwrap().is_new());
+        assert!(!engine.get(&ids[1]).unwrap().is_new());
+    }
+
+    #[test]
+    fn deserializes_legacy_cards() {
+        let json = r#"[{"id":"1","front":"f","back":"b","source_file":null,"source_context":null,"ease_factor":2.6,"interval_days":6,"repetitions":2,"next_review":"2024-01-01T00:00:00+00:00","created_at":"2024-01-01T00:00:00+00:00","last_reviewed":null,"collectionId":"c"}]"#;
+        let cards: Vec<Flashcard> = serde_json::from_str(json).unwrap();
+        assert_eq!(cards[0].lapses, 0);
+        assert_eq!(cards[0].collection_id.as_deref(), Some("c"));
+        assert!(cards[0].last_quality.is_none());
+    }
+
+    #[test]
+    fn survives_extreme_imported_values() {
+        let now = Utc::now();
+        let mut c = card();
+        c.repetitions = 1;
+        c.interval_days = i32::MAX;
+        c.ease_factor = f64::MAX;
+        c.review_at(ReviewQuality::Good, now);
+        assert_eq!(c.interval_days, MAX_INTERVAL_DAYS);
+        c.review_at(ReviewQuality::Easy, now);
+        assert!(c.interval_days <= MAX_INTERVAL_DAYS);
+        assert!(c.ease_factor <= MAX_EASE);
+        let mut engine = SpacedRepetitionEngine::with_cards(vec![card()]);
+        assert_eq!(engine.reset(None, Some(1e12), now).unwrap(), 1);
+    }
+
+    #[test]
+    fn removes_collection_cards_only() {
+        let mut a = card();
+        a.collection_id = Some("a".into());
+        let mut engine = SpacedRepetitionEngine::with_cards(vec![a, card()]);
+        assert_eq!(engine.remove_collection("a").unwrap(), 1);
+        assert_eq!(engine.cards().len(), 1);
+    }
 }
