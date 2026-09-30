@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
+  "$schema": "https://schema.tauri.app/config/2",
   "productName": "Annotate Studio",
   "version": "0.1.0",
   "identifier": "com.annotate-studio.app",
@@ -12,18 +12,33 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Annotate Studio",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 800,
+        "width": 1360,
+        "height": 860,
+        "minWidth": 860,
         "minHeight": 600,
         "decorations": false,
         "resizable": true,
-        "center": true
+        "center": true,
+        "dragDropEnabled": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self' 'wasm-unsafe-eval'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' blob: data:",
+        "font-src": "'self' data:",
+        "connect-src": "'self' ipc: http://ipc.localhost blob: data:",
+        "worker-src": "'self' blob:",
+        "media-src": "'self' blob: data:",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "frame-src": "'none'"
+      },
+      "dangerousDisableAssetCspModification": ["style-src"]
     }
   },
   "bundle": {
