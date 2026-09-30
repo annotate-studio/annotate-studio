@@ -1,390 +1,480 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Sun, Moon, Palette, Cpu, Zap, Wifi, WifiOff, RefreshCw, Trash2, CheckCircle, Circle, Monitor, Music, Volume2 } from 'lucide-react';
-import { useStore } from '@/lib/store';
-import { addAIProvider, testAIProvider, getAIProviders, checkOllama, removeAIProvider, setDefaultAIProvider, exportData, importData, saveCardQualities, type AIResponse } from '@/lib/tauri-commands';
-import { save, open } from '@tauri-apps/plugin-dialog';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Check,
+  CheckCircle2,
+  Circle,
+  Copy,
+  Cpu,
+  Database,
+  Download,
+  Keyboard,
+  Loader2,
+  Monitor,
+  Palette,
+  PlugZap,
+  Trash2,
+  Upload,
+  Wifi,
+  WifiOff,
+} from 'lucide-react';
+import {
+  addAIProvider,
+  checkOllama,
+  exportData,
+  getDataDir,
+  importData,
+  isTauri,
+  removeAIProvider,
+  reserveCommands,
+  setDefaultAIProvider,
+  testAIProvider,
+  type ProviderInfo,
+} from '@/lib/tauri-commands';
+import { flushAll } from '@/lib/persist';
+import { copyText, cn } from '@/lib/utils';
+import { THEME_IDS, useSettings, type ThemeMode } from '@/store/settings';
+import { PROVIDER_LABELS, useProviders } from '@/store/providers';
+import { confirmDialog } from '@/store/dialogs';
+import { toast } from '@/store/toast';
 
-type SettingsPane = 'appearance' | 'interface' | 'providers' | 'data';
+type Pane = 'appearance' | 'interface' | 'providers' | 'data' | 'shortcuts';
 
-const SIDEBAR_ITEMS: { id: SettingsPane; label: string; icon: React.ReactNode }[] = [
+const PANES: { id: Pane; label: string; icon: React.ReactNode }[] = [
   { id: 'appearance', label: 'Appearance', icon: <Palette size={16} /> },
   { id: 'interface', label: 'Interface', icon: <Monitor size={16} /> },
-  { id: 'providers', label: 'Providers', icon: <Cpu size={16} /> },
-  { id: 'data', label: 'Data', icon: <RefreshCw size={16} /> },
+  { id: 'providers', label: 'AI providers', icon: <Cpu size={16} /> },
+  { id: 'data', label: 'Data & backup', icon: <Database size={16} /> },
+  { id: 'shortcuts', label: 'Shortcuts', icon: <Keyboard size={16} /> },
 ];
 
-const THEMES: { id: 'white' | 'black' | 'sepia' | 'gray' | 'forest' | 'ocean' | 'lavender' | 'rose'; icon: React.ReactNode; label: string; desc: string; bg: string; fg: string }[] = [
-  { id: 'white', icon: <Sun size={20} />, label: 'White', desc: 'Clean light theme', bg: 'var(--bg-card)', fg: 'var(--text-primary)' },
-  { id: 'black', icon: <Moon size={20} />, label: 'Black', desc: 'OLED dark theme', bg: '#18181B', fg: '#FAFAFA' },
-  { id: 'sepia', icon: <Sun size={20} />, label: 'Sepia', desc: 'Warm paper tone', bg: '#FFF8F0', fg: '#2C1810' },
-  { id: 'gray', icon: <Moon size={20} />, label: 'Gray', desc: 'Neutral gray', bg: '#FAFAFB', fg: '#1F2024' },
-  { id: 'forest', icon: <Sun size={20} />, label: 'Forest', desc: 'Calm green', bg: '#F8FFF8', fg: '#1A2E1A' },
-  { id: 'ocean', icon: <Sun size={20} />, label: 'Ocean', desc: 'Cool blue', bg: '#F4FAFD', fg: '#0C2D48' },
-  { id: 'lavender', icon: <Sun size={20} />, label: 'Lavender', desc: 'Soft purple', bg: '#FAF7FD', fg: '#1E0A3C' },
-  { id: 'rose', icon: <Sun size={20} />, label: 'Rose', desc: 'Warm pink', bg: '#FFFAFA', fg: '#3C1010' },
+const THEME_PREVIEW: Record<ThemeMode, { label: string; bg: string; card: string; text: string }> = {
+  white: { label: 'Light', bg: '#F6F7F9', card: '#FFFFFF', text: '#0F172A' },
+  black: { label: 'Dark', bg: '#0B0B0E', card: '#18181B', text: '#FAFAFA' },
+  sepia: { label: 'Sepia', bg: '#F4ECDD', card: '#FFF8EE', text: '#2C1810' },
+  gray: { label: 'Gray', bg: '#E9EAEE', card: '#FAFAFB', text: '#1F2024' },
+  forest: { label: 'Forest', bg: '#E8F1E8', card: '#F8FFF8', text: '#1A2E1A' },
+  ocean: { label: 'Ocean', bg: '#E4F0F6', card: '#F4FAFD', text: '#0C2D48' },
+  lavender: { label: 'Lavender', bg: '#EEE7F6', card: '#FAF7FD', text: '#1E0A3C' },
+  rose: { label: 'Rose', bg: '#FBEAEA', card: '#FFFAFA', text: '#3C1010' },
+};
+
+const ACCENTS = ['#2563EB', '#7C3AED', '#DB2777', '#DC2626', '#EA580C', '#16A34A', '#0D9488', '#0891B2'];
+
+const PROVIDER_ORDER = ['openai', 'anthropic', 'google-gemini', 'ollama', 'openrouter', 'groq', 'deepseek', 'mistral', 'together', 'xai', 'perplexity', 'cohere'];
+
+const MODEL_HINTS: Record<string, string> = {
+  openai: 'gpt-4o-mini',
+  anthropic: 'claude-sonnet-5-5',
+  'google-gemini': 'gemini-2.0-flash',
+  ollama: 'llama3.1',
+  openrouter: 'openrouter/auto',
+  groq: 'llama-3.3-70b-versatile',
+  deepseek: 'deepseek-chat',
+  mistral: 'mistral-large-latest',
+  together: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+  xai: 'grok-2-latest',
+  perplexity: 'sonar-pro',
+  cohere: 'command-r-plus',
+};
+
+const SHORTCUTS: { keys: string; action: string }[] = [
+  { keys: 'Ctrl + 1…6 / Ctrl + ,', action: 'Go to canvas, library, flashcards, exams, pomodoro, motivation / settings' },
+  { keys: 'Ctrl + J', action: 'Show or hide the assistant' },
+  { keys: 'Drag background / Space + drag / middle mouse', action: 'Pan the canvas' },
+  { keys: 'Ctrl + scroll, pinch', action: 'Zoom the canvas around the pointer' },
+  { keys: 'Ctrl + = / Ctrl + - / Ctrl + 0', action: 'Zoom in, out, reset (PDF zoom when a PDF window is active)' },
+  { keys: 'Shift + 1 / Shift + 2', action: 'Fit all windows / zoom to the selected window' },
+  { keys: 'Ctrl + Z / Ctrl + Shift + Z', action: 'Undo / redo (layout, or annotations in the active PDF)' },
+  { keys: 'Double-click canvas', action: 'Create a note at that spot' },
+  { keys: 'Double-click title bar', action: 'Maximize or restore a window' },
+  { keys: 'Shift while dragging', action: 'Snap windows to a 20px grid' },
+  { keys: 'Esc', action: 'Restore a maximized window / deselect' },
+  { keys: 'Ctrl + Alt + N', action: 'New note' },
+  { keys: 'V H P M T R O A E', action: 'PDF tools: select, highlight, pen, marker, text, rectangle, ellipse, arrow, eraser' },
+  { keys: 'Delete', action: 'Delete selected PDF annotations' },
+  { keys: 'Ctrl + B / I / E / K', action: 'Bold, italic, code, link in notes' },
+  { keys: 'Space, 1–4', action: 'Flip card and rate it while reviewing flashcards' },
 ];
 
-const SOUNDS = ['beep', 'bell', 'chime', 'digital'];
-
-const PRESET_COLORS = ['#2563EB', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'];
-
-export default function SettingsTab() {
-  const {
-    theme, setTheme, primaryColor, setPrimaryColor,
-    appScale, setAppScale,
-    pomodoroSound, setPomodoroSound, saveSettingsToDisk,
-  } = useStore();
-  const [pane, setPane] = useState<SettingsPane>('appearance');
-
-  const [ollamaAvailable, setOllamaAvailable] = useState<boolean | null>(null);
-  const [providers, setProviders] = useState<{ type: string; model_name: string; model: string; configured: boolean; active: boolean; endpoint?: string }[]>([]);
-  const [providerType, setProviderType] = useState('openai');
+function ProvidersPane() {
+  const providers = useProviders((state) => state.providers);
+  const setProviders = useProviders((state) => state.set);
+  const refresh = useProviders((state) => state.refresh);
+  const [type, setType] = useState('openai');
   const [apiKey, setApiKey] = useState('');
-  const [endpoint, setEndpoint] = useState('http://localhost:11434');
+  const [endpoint, setEndpoint] = useState('');
   const [model, setModel] = useState('');
-  const [testResult, setTestResult] = useState<AIResponse | null>(null);
-  const [testing, setTesting] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [makeDefault, setMakeDefault] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState<string | null>(null);
+  const [ollama, setOllama] = useState<boolean | null>(null);
 
-  useEffect(() => { saveSettingsToDisk(); }, [theme, primaryColor, appScale, pomodoroSound]);
+  useEffect(() => {
+    void refresh();
+    checkOllama().then(setOllama).catch(() => setOllama(false));
+  }, [refresh]);
 
-  const refreshProviders = useCallback(async () => {
-    try { setProviders(await getAIProviders()); } catch {}
-  }, []);
+  const needsKey = type !== 'ollama';
+  const hasEndpoint = type === 'ollama' || type === 'openrouter';
 
-  const refreshOllama = useCallback(async () => {
-    try { setOllamaAvailable((await checkOllama()).available); } catch { setOllamaAvailable(false); }
-  }, []);
-
-  useEffect(() => { refreshProviders(); refreshOllama(); }, [refreshProviders, refreshOllama]);
-
-  const handleSave = async () => {
+  const test = async (id: string) => {
+    setTesting(id);
     try {
-      await addAIProvider(providerType, apiKey || undefined, providerType === 'ollama' ? endpoint : undefined, model || undefined);
-      setSaved(true);
-      await refreshProviders();
-      setTimeout(() => setSaved(false), 2000);
-    } catch {}
+      const response = await testAIProvider(id);
+      toast.success(`${response.model} is working`, response.content.slice(0, 120));
+    } catch (error) {
+      toast.error('Connection test failed', error);
+    } finally {
+      setTesting(null);
+    }
   };
 
-  const handleTest = async () => {
-    setTesting(true);
-    setTestResult(null);
-    try {
-      await handleSave();
-      setTestResult(await testAIProvider());
-    } catch (err) {
-      setTestResult({ content: `Error: ${err}`, provider: 'error', model: '' });
+  const save = async (andTest: boolean) => {
+    if (needsKey && !apiKey.trim()) {
+      toast.warning('Enter an API key first');
+      return;
     }
-    setTesting(false);
+    setSaving(true);
+    try {
+      const next = await addAIProvider(type, apiKey.trim() || undefined, endpoint.trim() || undefined, model.trim() || undefined, makeDefault || providers.length === 0);
+      setProviders(next);
+      const added = next.find((p) => p.type === type && (!model.trim() || p.model === model.trim())) ?? next[next.length - 1];
+      toast.success('Provider saved', added ? `${PROVIDER_LABELS[added.type] ?? added.type} · ${added.model}` : undefined);
+      setApiKey('');
+      setModel('');
+      if (andTest && added) await test(added.id);
+    } catch (error) {
+      toast.error('Could not save the provider', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (provider: ProviderInfo) => {
+    const ok = await confirmDialog({ title: `Remove ${provider.model}?`, message: 'Its API key will be deleted from this computer.', confirmLabel: 'Remove', danger: true });
+    if (!ok) return;
+    try {
+      setProviders(await removeAIProvider(provider.type, provider.model));
+    } catch (error) {
+      toast.error('Could not remove the provider', error);
+    }
   };
 
   return (
-    <div style={{ height: '100%', display: 'flex', overflow: 'hidden' }}>
-      <div style={{
-        width: 180, borderRight: '1px solid var(--border)', padding: '16px 0',
-        display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0,
-      }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', padding: '0 16px 12px', borderBottom: '1px solid var(--border)', marginBottom: 8 }}>
-          Settings
-        </div>
-        {SIDEBAR_ITEMS.map((item) => (
-          <button key={item.id} onClick={() => setPane(item.id)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', fontSize: 13,
-              color: pane === item.id ? 'var(--primary)' : 'var(--text-secondary)',
-              background: pane === item.id ? 'var(--primary-light)' : 'transparent',
-              border: 'none', cursor: 'pointer', textAlign: 'left', width: '100%',
-            }}
-          >
-            {item.icon}
-            {item.label}
-          </button>
-        ))}
+    <div className="settings-section">
+      <h2>AI providers</h2>
+      <p className="muted">AI features are optional. Your keys are stored only on this computer and requests go directly to the provider you choose.</p>
+
+      <div className={cn('status-row', ollama ? 'status-ok' : 'status-off')}>
+        {ollama === null ? <Loader2 size={14} className="spin" /> : ollama ? <Wifi size={14} /> : <WifiOff size={14} />}
+        {ollama === null ? 'Looking for Ollama…' : ollama ? 'Ollama is running on this computer' : 'Ollama was not found on localhost:11434'}
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
-        {pane === 'appearance' && (
-          <div style={{ maxWidth: 600, display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>Appearance</h2>
+      <div className="settings-card">
+        <h3>Your models</h3>
+        {providers.length === 0 ? (
+          <p className="muted">No providers yet — add one below.</p>
+        ) : (
+          <div className="provider-list">
+            {providers.map((provider) => (
+              <div key={provider.id} className={cn('provider-row', provider.active && 'provider-row-active')}>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  onClick={async () => setProviders(await setDefaultAIProvider(provider.type, provider.model))}
+                  title={provider.active ? 'Default model' : 'Make default'}
+                >
+                  {provider.active ? <CheckCircle2 size={17} /> : <Circle size={17} />}
+                </button>
+                <div className="provider-info">
+                  <strong>{provider.model}</strong>
+                  <span>
+                    {PROVIDER_LABELS[provider.type] ?? provider.type}
+                    {provider.endpoint ? ` · ${provider.endpoint}` : ''}
+                    {provider.active ? ' · default' : ''}
+                  </span>
+                </div>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => void test(provider.id)} disabled={testing !== null}>
+                  {testing === provider.id ? <Loader2 size={13} className="spin" /> : <PlugZap size={13} />} Test
+                </button>
+                <button type="button" className="icon-btn icon-btn-danger" onClick={() => void remove(provider)} title="Remove">
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
-            <div className="card" style={{ padding: 20 }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 12 }}>Theme</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 8 }}>
-                {THEMES.map((t) => (
-                  <button key={t.id} onClick={() => setTheme(t.id)}
-                    style={{
-                      padding: '12px 8px', textAlign: 'center', cursor: 'pointer', borderRadius: 'var(--radius-lg)',
-                      border: theme === t.id ? '2px solid var(--primary)' : '1px solid var(--border)',
-                      background: t.bg, color: t.fg,
-                    }}
-                  >
-                    {t.icon}
-                    <div style={{ fontSize: 12, fontWeight: 500, marginTop: 4 }}>{t.label}</div>
-                    <div style={{ fontSize: 10, opacity: 0.6 }}>{t.desc}</div>
-                  </button>
-                ))}
+      <div className="settings-card">
+        <h3>Add a model</h3>
+        <div className="chip-row">
+          {PROVIDER_ORDER.map((id) => (
+            <button
+              key={id}
+              type="button"
+              className={cn('chip', type === id && 'chip-active')}
+              onClick={() => {
+                setType(id);
+                setEndpoint('');
+                setModel('');
+              }}
+            >
+              {PROVIDER_LABELS[id] ?? id}
+            </button>
+          ))}
+        </div>
+        <div className="form-grid form-grid-2">
+          {needsKey && (
+            <label className="field field-wide">
+              <span className="field-label">API key</span>
+              <input className="input mono" type="password" value={apiKey} autoComplete="off" onChange={(event) => setApiKey(event.target.value)} placeholder={`${PROVIDER_LABELS[type] ?? type} API key`} />
+            </label>
+          )}
+          {hasEndpoint && (
+            <label className="field field-wide">
+              <span className="field-label">Endpoint</span>
+              <input
+                className="input mono"
+                value={endpoint}
+                onChange={(event) => setEndpoint(event.target.value)}
+                placeholder={type === 'ollama' ? 'http://localhost:11434' : 'https://openrouter.ai/api/v1'}
+              />
+            </label>
+          )}
+          <label className="field field-wide">
+            <span className="field-label">Model</span>
+            <input className="input mono" value={model} onChange={(event) => setModel(event.target.value)} placeholder={MODEL_HINTS[type] ?? 'model name'} />
+          </label>
+          <label className="checkbox-row field-wide">
+            <input type="checkbox" checked={makeDefault} onChange={(event) => setMakeDefault(event.target.checked)} />
+            Use as the default model
+          </label>
+        </div>
+        <div className="button-row">
+          <button type="button" className="btn btn-primary" onClick={() => void save(false)} disabled={saving}>
+            {saving ? <Loader2 size={15} className="spin" /> : <Check size={15} />} Save
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={() => void save(true)} disabled={saving}>
+            <PlugZap size={15} /> Save and test
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DataPane() {
+  const [dataDir, setDataDir] = useState('');
+  const [busy, setBusy] = useState<'export' | 'import' | null>(null);
+
+  useEffect(() => {
+    getDataDir().then(setDataDir).catch(() => setDataDir(''));
+  }, []);
+
+  const doExport = async () => {
+    if (!isTauri()) return;
+    const { save } = await import('@tauri-apps/plugin-dialog');
+    const path = await save({
+      defaultPath: `annotate-studio-${new Date().toISOString().slice(0, 10)}.anos`,
+      filters: [{ name: 'Annotate Studio backup', extensions: ['anos'] }],
+    });
+    if (!path) return;
+    setBusy('export');
+    try {
+      await flushAll();
+      const count = await exportData(path);
+      toast.success('Backup saved', `${count} files · ${path}`);
+    } catch (error) {
+      toast.error('Backup failed', error);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doImport = async () => {
+    if (!isTauri()) return;
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const selection = await open({ multiple: false, filters: [{ name: 'Annotate Studio backup', extensions: ['anos', 'zip'] }] });
+    if (!selection || Array.isArray(selection)) return;
+    const ok = await confirmDialog({
+      title: 'Restore this backup?',
+      message: 'Files in the backup replace your current data. A safety copy of your current data is saved in the backups folder first.',
+      confirmLabel: 'Restore',
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy('import');
+    try {
+      await flushAll();
+      reserveCommands('import_data');
+      const count = await importData(selection);
+      toast.success('Backup restored', `${count} files — reloading…`);
+      setTimeout(() => window.location.reload(), 900);
+    } catch (error) {
+      reserveCommands(null);
+      toast.error('Restore failed', error);
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="settings-section">
+      <h2>Data & backup</h2>
+      <div className="settings-card">
+        <h3>Where your data lives</h3>
+        <p className="muted">Everything is stored locally in this folder: documents, notes, canvas layouts, flashcards, exams and settings.</p>
+        <div className="path-row">
+          <code>{dataDir || '…'}</code>
+          <button type="button" className="icon-btn" onClick={() => void copyText(dataDir).then((ok) => ok && toast.success('Path copied'))} title="Copy path">
+            <Copy size={14} />
+          </button>
+        </div>
+      </div>
+      <div className="settings-card">
+        <h3>Back up everything</h3>
+        <p className="muted">Save all your study data into a single .anos file you can restore later or on another computer.</p>
+        <button type="button" className="btn btn-primary" onClick={() => void doExport()} disabled={busy !== null}>
+          {busy === 'export' ? <Loader2 size={15} className="spin" /> : <Download size={15} />} Create backup
+        </button>
+      </div>
+      <div className="settings-card">
+        <h3>Restore from a backup</h3>
+        <p className="muted">Replaces current data with the contents of a backup file.</p>
+        <button type="button" className="btn btn-secondary" onClick={() => void doImport()} disabled={busy !== null}>
+          {busy === 'import' ? <Loader2 size={15} className="spin" /> : <Upload size={15} />} Restore backup…
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function SettingsTab() {
+  const [pane, setPane] = useState<Pane>('appearance');
+  const theme = useSettings((state) => state.theme);
+  const primaryColor = useSettings((state) => state.primaryColor);
+  const appScale = useSettings((state) => state.appScale);
+  const notificationsEnabled = useSettings((state) => state.notificationsEnabled);
+  const update = useSettings((state) => state.update);
+  const scales = useMemo(() => [90, 100, 110, 125, 150], []);
+
+  return (
+    <div className="split-page">
+      <aside className="side-panel">
+        <div className="side-panel-header">
+          <span>Settings</span>
+        </div>
+        <div className="side-panel-list">
+          {PANES.map((entry) => (
+            <div key={entry.id} className={cn('side-item', pane === entry.id && 'side-item-active')}>
+              <button type="button" className="side-item-main" onClick={() => setPane(entry.id)}>
+                {entry.icon}
+                <span className="side-item-label">{entry.label}</span>
+              </button>
+            </div>
+          ))}
+        </div>
+      </aside>
+      <section className="page page-narrow">
+        {pane === 'appearance' && (
+          <div className="settings-section">
+            <h2>Appearance</h2>
+            <div className="settings-card">
+              <h3>Theme</h3>
+              <div className="theme-grid">
+                {THEME_IDS.map((id) => {
+                  const preview = THEME_PREVIEW[id];
+                  return (
+                    <button key={id} type="button" className={cn('theme-tile', theme === id && 'theme-tile-active')} onClick={() => update({ theme: id })}>
+                      <span className="theme-swatch" style={{ background: preview.bg }}>
+                        <span style={{ background: preview.card, color: preview.text }}>Aa</span>
+                      </span>
+                      <span>{preview.label}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
-
-            <div className="card" style={{ padding: 20 }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 12 }}>Primary Color</div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
-                <input type="color" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)}
-                  style={{ width: 36, height: 36, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', cursor: 'pointer', background: 'none', padding: 2 }}
-                />
-                <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'JetBrains Mono', monospace" }}>{primaryColor}</span>
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {PRESET_COLORS.map((c) => (
-                  <button key={c} onClick={() => setPrimaryColor(c)}
-                    style={{
-                      width: 28, height: 28, borderRadius: '50%', border: primaryColor === c ? '2px solid var(--text-primary)' : '2px solid transparent',
-                      background: c, cursor: 'pointer',
-                    }}
+            <div className="settings-card">
+              <h3>Accent color</h3>
+              <div className="accent-row">
+                {ACCENTS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    className={cn('accent-dot', primaryColor.toLowerCase() === color.toLowerCase() && 'accent-dot-active')}
+                    style={{ background: color }}
+                    onClick={() => update({ primaryColor: color })}
+                    aria-label={`Accent ${color}`}
                   />
                 ))}
+                <label className="accent-custom" title="Custom color">
+                  <input type="color" value={primaryColor} onChange={(event) => update({ primaryColor: event.target.value.toUpperCase() })} />
+                  <span className="mono">{primaryColor}</span>
+                </label>
               </div>
             </div>
           </div>
         )}
 
         {pane === 'interface' && (
-          <div style={{ maxWidth: 500, display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>Interface</h2>
-
-            <div className="card" style={{ padding: 20 }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>Interface Scaling</div>
-              <input type="range" min={100} max={200} step={10} value={appScale}
-                onChange={(e) => setAppScale(Number(e.target.value))}
-                style={{ width: '100%', accentColor: 'var(--primary)' }}
+          <div className="settings-section">
+            <h2>Interface</h2>
+            <div className="settings-card">
+              <h3>Interface size</h3>
+              <input
+                type="range"
+                min={80}
+                max={200}
+                step={5}
+                value={appScale}
+                onChange={(event) => update({ appScale: Number(event.target.value) })}
+                className="range"
               />
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                <span>100%</span>
-                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{appScale}%</span>
-                <span>200%</span>
-              </div>
-            </div>
-
-            <div className="card" style={{ padding: 20 }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
-                <Volume2 size={14} style={{ marginRight: 6 }} /> Pomodoro Sound
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {SOUNDS.map((s) => (
-                  <button key={s} onClick={() => setPomodoroSound(s)}
-                    className="btn btn-ghost no-hover"
-                    style={{
-                      textTransform: 'capitalize', fontSize: 12,
-                      border: pomodoroSound === s ? '1px solid var(--primary)' : '1px solid var(--border)',
-                    }}
-                  >
-                    <Music size={12} /> {s}
+              <div className="chip-row">
+                {scales.map((value) => (
+                  <button key={value} type="button" className={cn('chip', appScale === value && 'chip-active')} onClick={() => update({ appScale: value })}>
+                    {value}%
                   </button>
                 ))}
+                <span className="muted">Current: {appScale}%</span>
               </div>
+            </div>
+            <div className="settings-card">
+              <h3>Notifications</h3>
+              <label className="checkbox-row">
+                <input type="checkbox" checked={notificationsEnabled} onChange={(event) => update({ notificationsEnabled: event.target.checked })} />
+                Notify me when a Pomodoro phase ends and when flashcards are due
+              </label>
             </div>
           </div>
         )}
 
-        {pane === 'providers' && (
-          <div style={{ maxWidth: 500, display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>Providers</h2>
-              <button className="btn btn-ghost no-hover" onClick={() => { refreshProviders(); refreshOllama(); }}
-                style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <RefreshCw size={12} /> Refresh
-              </button>
-            </div>
+        {pane === 'providers' && <ProvidersPane />}
+        {pane === 'data' && <DataPane />}
 
-            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
-              {ollamaAvailable === null ? (
-                <><RefreshCw size={14} className="animate-spin" /><span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Checking Ollama...</span></>
-              ) : ollamaAvailable ? (
-                <><Wifi size={14} style={{ color: 'var(--success)' }} /><span style={{ fontSize: 13, color: 'var(--text-primary)' }}>Ollama is running</span></>
-              ) : (
-                <><WifiOff size={14} style={{ color: 'var(--danger)' }} /><span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Ollama not detected</span></>
-              )}
-            </div>
-
-            <div className="card" style={{ padding: 20 }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 12 }}>
-                Registered Providers
-              </div>
-              {providers.length === 0 ? (
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No providers configured yet.</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {providers.map((p, i) => (
-                    <div key={i} style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '10px 12px', borderRadius: 'var(--radius-md)',
-                      background: p.active ? 'var(--primary-light)' : 'var(--bg-app)',
-                      border: p.active ? '1px solid var(--primary)' : '1px solid transparent',
-                      cursor: 'pointer', fontSize: 13,
-                    }}
-                      onClick={async () => { try { await setDefaultAIProvider(p.type); refreshProviders(); } catch {} }}
-                    >
-                      {p.active
-                        ? <CheckCircle size={16} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-                        : <Circle size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-                      }
-                      <Zap size={14} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 500, textTransform: 'capitalize', color: 'var(--text-primary)' }}>
-                          {p.type}
-                          {p.active && <span style={{ fontSize: 10, color: 'var(--primary)', marginLeft: 6 }}>default</span>}
-                        </div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>{p.model}{p.endpoint ? ` · ${p.endpoint}` : ''}</div>
-                      </div>
-                      <button
-                        onClick={async (e) => { e.stopPropagation(); try { await removeAIProvider(p.type, p.model_name ?? p.model); refreshProviders(); } catch {} }}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 4, flexShrink: 0 }}
-                        title={`Remove ${p.type}`}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
+        {pane === 'shortcuts' && (
+          <div className="settings-section">
+            <h2>Keyboard shortcuts</h2>
+            <div className="settings-card">
+              <table className="shortcut-table">
+                <tbody>
+                  {SHORTCUTS.map((shortcut) => (
+                    <tr key={shortcut.keys}>
+                      <td>
+                        <kbd>{shortcut.keys}</kbd>
+                      </td>
+                      <td>{shortcut.action}</td>
+                    </tr>
                   ))}
-                </div>
-              )}
-            </div>
-
-            <div className="card" style={{ padding: 20 }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 12 }}>Add Provider</div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: 6 }}>POPULAR</div>
-              <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-                {['openai', 'anthropic', 'google-gemini', 'mistral', 'groq'].map((p) => (
-                  <button key={p} onClick={() => { setProviderType(p); setModel(''); setApiKey(''); setEndpoint('http://localhost:11434'); }}
-                    className={`btn ${providerType === p ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ fontSize: 12, textTransform: 'capitalize' }}
-                  >
-                    {p === 'google-gemini' ? 'Gemini' : p}
-                  </button>
-                ))}
-              </div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: 6, marginTop: 8 }}>MORE</div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {['deepseek', 'openrouter', 'together', 'xai', 'perplexity', 'cohere', 'ollama'].map((p) => (
-                  <button key={p} onClick={() => { setProviderType(p); setModel(''); setApiKey(''); setEndpoint('http://localhost:11434'); }}
-                    className={`btn ${providerType === p ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ fontSize: 12, textTransform: 'capitalize' }}
-                  >
-                    {p === 'xai' ? 'xAI' : p === 'together' ? 'Together' : p}
-                  </button>
-                ))}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {providerType !== 'ollama' && (
-                  <div>
-                    <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>API Key</label>
-                    <input type="password" className="input" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-                      placeholder={`Enter your ${providerType} API key`} />
-                  </div>
-                )}
-                {(providerType === 'ollama' || providerType === 'openrouter') && (
-                  <div>
-                    <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Endpoint</label>
-                    <input className="input" value={endpoint} onChange={(e) => setEndpoint(e.target.value)}
-                      placeholder={providerType === 'ollama' ? 'http://localhost:11434' : 'https://openrouter.ai/api/v1'} />
-                  </div>
-                )}
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Model</label>
-                  <input className="input" value={model} onChange={(e) => setModel(e.target.value)}
-                    placeholder={{
-                      openai: 'gpt-4o', anthropic: 'claude-sonnet-4-20250514', deepseek: 'deepseek-chat',
-                      openrouter: 'openrouter/auto', groq: 'llama-3.3-70b-versatile', ollama: 'llama3',
-                      'google-gemini': 'gemini-2.0-flash', mistral: 'mistral-large-latest',
-                      together: 'mistralai/Mixtral-8x22B-Instruct-v0.1', xai: 'grok-2-latest',
-                      perplexity: 'sonar-pro', cohere: 'command-r-plus',
-                    }[providerType] || 'model-name'} />
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-                <button className="btn btn-primary" onClick={handleSave} style={{ fontSize: 13 }}>
-                  {saved ? <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>Saved</span> : 'Save'}
-                </button>
-                <button className="btn btn-ghost no-hover" onClick={handleTest} disabled={testing} style={{ fontSize: 13 }}>
-                  {testing ? 'Testing...' : 'Test Connection'}
-                </button>
-              </div>
-              {testResult && (
-                <div style={{
-                  marginTop: 12, padding: '10px 14px', borderRadius: 'var(--radius-md)',
-                  background: testResult.provider === 'error' ? 'var(--danger-light)' : 'var(--success-light)',
-                  border: `1px solid ${testResult.provider === 'error' ? 'var(--danger)' : 'var(--success)'}`,
-                  fontSize: 13, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8,
-                }}>
-                  {testResult.provider === 'error' ? <WifiOff size={14} /> : <Wifi size={14} />}
-                  <span><strong>{testResult.provider}:</strong> {testResult.content}</span>
-                </div>
-              )}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
-
-        {pane === 'data' && (
-          <div style={{ maxWidth: 500, display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>Data</h2>
-
-            <div className="card" style={{ padding: 20 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
-                Export All Data
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
-                Save all your data — flashcards, collections, documents, notes, canvas, exams,
-                providers, chat sessions, and study analytics — as a single <code>.anos</code> archive.
-              </div>
-              <button className="btn btn-primary" onClick={async () => {
-                try {
-                  const path = await save({
-                    filters: [{ name: 'Annotate Studio Archive', extensions: ['anos'] }],
-                    defaultPath: `backup-${new Date().toISOString().slice(0, 10)}.anos`,
-                  });
-                  if (!path) return;
-                  await exportData(path);
-                  alert('Data exported successfully.');
-                } catch (e) { alert('Export failed: ' + e); }
-              }} style={{ fontSize: 13 }}>
-                Export Data
-              </button>
-            </div>
-
-            <div className="card" style={{ padding: 20 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
-                Import Data
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
-                Restore data from a <code>.anos</code> archive. This will overwrite all current data
-                including flashcards, documents, canvas, and settings.
-              </div>
-              <button className="btn" onClick={async () => {
-                try {
-                  const path = await open({
-                    filters: [{ name: 'Annotate Studio Archive', extensions: ['anos'] }],
-                    multiple: false,
-                  });
-                  if (!path) return;
-                  if (!confirm('Importing will overwrite all existing data. Are you sure?')) return;
-                  const cq = await importData(path as string);
-                  if (cq) await saveCardQualities(cq);
-                  alert('Data imported successfully. Reload the app to see changes.');
-                } catch (e) { alert('Import failed: ' + e); }
-              }} style={{
-                fontSize: 13,
-                background: 'var(--warning)', color: 'var(--primary-text)', border: 'none',
-                borderRadius: 'var(--radius-md)', cursor: 'pointer', fontWeight: 600,
-                padding: '8px 16px',
-              }}>
-                Import Data
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      </section>
     </div>
   );
 }

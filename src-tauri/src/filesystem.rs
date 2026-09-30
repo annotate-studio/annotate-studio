@@ -1,13 +1,15 @@
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use std::path::Path;
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+use crate::paths::{extension_of, Workspace, DOCUMENTS_DIR, NOTES_DIR};
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
     Pdf,
     Markdown,
-    StickyNote,
+    Text,
     Image,
+    Document,
     Unknown,
 }
 
@@ -16,148 +18,120 @@ impl FileType {
         match ext.to_lowercase().as_str() {
             "pdf" => FileType::Pdf,
             "md" | "markdown" | "mdx" => FileType::Markdown,
-            "txt" => FileType::StickyNote,
-            "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" => FileType::Image,
+            "txt" | "text" => FileType::Text,
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "avif" => FileType::Image,
+            "docx" | "odt" => FileType::Document,
             _ => FileType::Unknown,
+        }
+    }
+
+    pub fn from_path(path: &Path) -> Self {
+        Self::from_extension(&extension_of(path))
+    }
+
+    pub fn default_dir(self) -> &'static str {
+        match self {
+            FileType::Markdown | FileType::Text => NOTES_DIR,
+            _ => DOCUMENTS_DIR,
         }
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 pub struct StudyFile {
     pub id: String,
     pub name: String,
     pub path: String,
     pub file_type: FileType,
+    pub size: u64,
     pub created_at: String,
-    pub x: f64,
-    pub y: f64,
+    pub modified_at: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CanvasItem {
-    pub id: String,
-    pub file_id: Option<String>,
-    pub item_type: String,
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-    pub content: Option<String>,
+fn to_rfc3339(time: std::io::Result<std::time::SystemTime>) -> String {
+    time.map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
+        .unwrap_or_default()
 }
 
-pub struct FileSystem {
-    workspace_root: PathBuf,
+pub fn describe(workspace: &Workspace, path: &Path) -> Option<StudyFile> {
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    let relative = workspace.relative(path)?;
+    let modified_at = to_rfc3339(metadata.modified());
+    let created = to_rfc3339(metadata.created());
+    Some(StudyFile {
+        id: relative.clone(),
+        name: path.file_name()?.to_string_lossy().into_owned(),
+        path: relative,
+        file_type: FileType::from_path(path),
+        size: metadata.len(),
+        created_at: if created.is_empty() {
+            modified_at.clone()
+        } else {
+            created
+        },
+        modified_at,
+    })
 }
 
-impl FileSystem {
-    pub fn new(workspace_root: PathBuf) -> Self {
-        Self { workspace_root }
+pub fn list_dir(workspace: &Workspace, subdirectory: &str) -> Result<Vec<StudyFile>, String> {
+    let dir = workspace.resolve(subdirectory)?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let entries =
+        std::fs::read_dir(&dir).map_err(|e| format!("Failed to read {}: {e}", dir.display()))?;
+    let mut files: Vec<StudyFile> = entries
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
+        .filter_map(|entry| describe(workspace, &entry.path()))
+        .filter(|file| file.file_type != FileType::Unknown)
+        .collect();
+    files.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+    Ok(files)
+}
+
+pub fn list_study_files(workspace: &Workspace) -> Result<Vec<StudyFile>, String> {
+    let mut all = list_dir(workspace, DOCUMENTS_DIR)?;
+    all.extend(list_dir(workspace, NOTES_DIR)?);
+    all.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+    Ok(all)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_extensions_to_types() {
+        assert_eq!(FileType::from_extension("PDF"), FileType::Pdf);
+        assert_eq!(FileType::from_extension("md"), FileType::Markdown);
+        assert_eq!(FileType::from_extension("jpeg"), FileType::Image);
+        assert_eq!(FileType::from_extension("docx"), FileType::Document);
+        assert_eq!(FileType::from_extension("exe"), FileType::Unknown);
+        assert_eq!(FileType::Markdown.default_dir(), NOTES_DIR);
+        assert_eq!(FileType::Pdf.default_dir(), DOCUMENTS_DIR);
     }
 
-    pub fn workspace_root(&self) -> &Path {
-        &self.workspace_root
-    }
-
-    pub fn ensure_workspace(&self) -> Result<(), std::io::Error> {
-        let dirs = ["documents", "notes", "flashcards", "index", "canvas"];
-        for dir in dirs {
-            std::fs::create_dir_all(self.workspace_root.join(dir))?;
-        }
-        Ok(())
-    }
-
-    pub fn save_file(&self, content: &[u8], relative_path: &str) -> Result<PathBuf, std::io::Error> {
-        let path = self.workspace_root.join(relative_path);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, content)?;
-        Ok(path)
-    }
-
-    pub fn read_file(&self, relative_path: &str) -> Result<Vec<u8>, std::io::Error> {
-        let path = self.workspace_root.join(relative_path);
-        if !path.exists() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("File not found: {}", relative_path),
-            ));
-        }
-        std::fs::read(path)
-    }
-
-    pub fn read_file_text(&self, relative_path: &str) -> Result<String, std::io::Error> {
-        let bytes = self.read_file(relative_path)?;
-        String::from_utf8(bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-    }
-
-    pub fn delete_file(&self, relative_path: &str) -> Result<(), std::io::Error> {
-        let path = self.workspace_root.join(relative_path);
-        if path.exists() {
-            std::fs::remove_file(path)?;
-        }
-        Ok(())
-    }
-
-    pub fn list_files(&self, subdirectory: &str) -> Result<Vec<StudyFile>, std::io::Error> {
-        let dir = self.workspace_root.join(subdirectory);
-        let mut files = Vec::new();
-
-        if !dir.exists() {
-            return Ok(files);
-        }
-
-        for entry in std::fs::read_dir(&dir)? {
-            let entry = entry?;
-            let metadata = entry.metadata()?;
-            let path = entry.path();
-
-            if path.is_dir() {
-                continue;
-            }
-
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
-
-            let file_type = FileType::from_extension(ext);
-            if file_type == FileType::Unknown {
-                continue;
-            }
-
-            let created_at = metadata
-                .modified()
-                .map(|t| {
-                    let datetime: chrono::DateTime<chrono::Utc> = t.into();
-                    datetime.to_rfc3339()
-                })
-                .unwrap_or_default();
-
-            files.push(StudyFile {
-                id: Uuid::new_v4().to_string(),
-                name: entry.file_name().to_string_lossy().to_string(),
-                path: path.to_string_lossy().to_string(),
-                file_type,
-                created_at,
-                x: 0.0,
-                y: 0.0,
-            });
-        }
-
-        Ok(files)
-    }
-
-    pub fn list_all_files(&self) -> Result<Vec<StudyFile>, std::io::Error> {
-        let mut all_files = Vec::new();
-        for subdir in &["documents", "notes"] {
-            all_files.extend(self.list_files(subdir)?);
-        }
-        Ok(all_files)
-    }
-
-    pub fn workspace_join(&self, relative: &str) -> PathBuf {
-        self.workspace_root.join(relative)
+    #[test]
+    fn lists_files_with_relative_paths() {
+        let root = std::env::temp_dir().join(format!("annotate-fs-{}", uuid::Uuid::new_v4()));
+        let workspace = Workspace::new(root.clone());
+        workspace.ensure().unwrap();
+        std::fs::write(root.join("documents").join("a.pdf"), b"%PDF").unwrap();
+        std::fs::write(root.join("notes").join("b.md"), b"# b").unwrap();
+        std::fs::write(root.join("notes").join(".b.md.tmp"), b"x").unwrap();
+        std::fs::write(root.join("documents").join("c.exe"), b"x").unwrap();
+        let files = list_study_files(&workspace).unwrap();
+        let mut paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            vec!["documents/a.pdf".to_string(), "notes/b.md".to_string()]
+        );
+        assert!(files.iter().all(|f| f.id == f.path));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

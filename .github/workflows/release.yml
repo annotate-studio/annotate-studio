@@ -20,7 +20,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Get version
         run: echo "PACKAGE_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> $GITHUB_ENV
@@ -73,9 +73,9 @@ jobs:
         include:
           - platform: macos-latest
             target: aarch64-apple-darwin
-            args: --bundles dmg
+            args: --bundles dmg --target aarch64-apple-darwin
 
-          - platform: macos-13
+          - platform: macos-latest
             target: x86_64-apple-darwin
             args: --bundles dmg --target x86_64-apple-darwin
 
@@ -94,7 +94,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'yarn'
           cache-dependency-path: yarn.lock
 
@@ -124,7 +124,7 @@ jobs:
       - name: Install frontend dependencies
         run: yarn install --frozen-lockfile
 
-      - uses: tauri-apps/tauri-action@v2
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

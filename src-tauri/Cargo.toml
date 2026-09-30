@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Local-first Study Environment"
 authors = ["Taha. Dostifam <mr.tahadostifam@gmail.com>"]
 edition = "2021"
+rust-version = "1.82"
 
 [lib]
 name = "scholar_os_lib"
@@ -18,20 +19,17 @@ tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-single-instance = "2"
+tokio = { version = "1", features = ["macros", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
 reqwest = { version = "0.12", features = ["json"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
-anyhow = "1"
-base64 = "0.22"
 zip = "2"
 
 [profile.release]
-panic = "abort"
 codegen-units = 1
 lto = true
 opt-level = "s"
