@@ -3004,6 +3004,40 @@ input[type='checkbox'] {
   text-decoration: line-through;
 }
 
+.prompt-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--primary-border);
+  background: var(--primary-soft-strong);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  max-width: 240px;
+}
+
+.prompt-chip button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 100%;
+  padding: 0 6px 0 9px;
+  color: inherit;
+  min-width: 0;
+}
+
+.prompt-chip button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-chip button + button {
+  padding: 0 8px 0 2px;
+  font-family: inherit;
+}
+
 .chat-input-row {
   position: relative;
   display: flex;

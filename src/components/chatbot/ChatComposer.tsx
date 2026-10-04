@@ -4,7 +4,7 @@ import React, { forwardRef, useImperativeHandle, useMemo, useRef, useState } fro
 import { ArrowUp, BookOpenCheck, FileText, Paperclip, Square, Wand2, X } from 'lucide-react';
 import type { ChatEngine } from './useChatEngine';
 import PromptsDialog from './PromptsDialog';
-import type { PromptId } from '@/lib/promptPresets';
+import { getPreset, type PromptId } from '@/lib/promptPresets';
 import { useLibrary } from '@/store/library';
 import { useChatSessions } from '@/store/sessions';
 import type { StudyFile } from '@/lib/tauri-commands';
@@ -24,6 +24,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
   const [highlight, setHighlight] = useState(0);
   const [promptsOpen, setPromptsOpen] = useState(false);
+  const [enabledPrompt, setEnabledPrompt] = useState<PromptId | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const files = useLibrary((state) => state.files);
   const hasConversation = useChatSessions((state) => {
@@ -88,43 +89,74 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
   const submit = () => {
     const text = value.trim();
     if (!text || engine.busy) return;
+    const prompt = enabledPrompt;
     setValue('');
     setMention(null);
+    setEnabledPrompt(null);
     requestAnimationFrame(resize);
-    void engine.send(text);
+    if (prompt) void engine.runPrompt(prompt, { text });
+    else void engine.send(text);
   };
 
+  const draft = value.trim();
+
   const explain = () => {
-    const text = value.trim();
-    if (!text || engine.busy) return;
+    if (!draft || engine.busy) return;
     setValue('');
     requestAnimationFrame(resize);
-    void engine.explain(text);
+    void engine.explain(draft);
   };
 
   const pickPrompt = (preset: PromptId) => {
     setPromptsOpen(false);
     if (engine.busy) return;
-    const text = value.trim();
-    setValue('');
+    setEnabledPrompt(preset);
     setMention(null);
-    requestAnimationFrame(resize);
-    void engine.runPrompt(preset, { text });
+    requestAnimationFrame(() => {
+      resize();
+      textareaRef.current?.focus();
+    });
   };
 
+  const clearPrompt = () => {
+    setEnabledPrompt(null);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const activePreset = enabledPrompt ? getPreset(enabledPrompt) : null;
   const activeAttachments = engine.attachments.filter((attachment) => attachment.enabled).length;
-  const promptHint = activeAttachments
-    ? `Runs on ${activeAttachments} attached document${activeAttachments === 1 ? '' : 's'}${value.trim() ? ' and your message.' : '.'}`
-    : value.trim()
-      ? 'Runs on the text in the message box.'
+  const promptSource = activeAttachments
+    ? `${activeAttachments} attached document${activeAttachments === 1 ? '' : 's'}${draft ? ' and your message' : ''}`
+    : draft
+      ? 'the text in your message'
       : hasConversation
-        ? 'Runs on the latest messages in this chat.'
-        : 'Attach a document, paste some text, or ask a question first.';
+        ? 'the latest messages in this chat'
+        : null;
+  const promptHint = !promptSource
+    ? 'Attach a document, paste some text, or ask a question first.'
+    : activePreset
+      ? `Press Enter to run ${activePreset.label} on ${promptSource}.`
+      : `Pick a prompt to enable it, then write your request and press Enter. It runs on ${promptSource}.`;
 
   return (
     <div className="chat-composer">
-      {engine.attachments.length > 0 && (
+      {(engine.attachments.length > 0 || activePreset) && (
         <div className="chat-attachments">
+          {activePreset && (
+            <span className="prompt-chip">
+              <button
+                type="button"
+                onClick={() => textareaRef.current?.focus()}
+                title={`${activePreset.label} is enabled — write your request and press Enter`}
+              >
+                <Wand2 size={12} />
+                <span>{activePreset.label}</span>
+              </button>
+              <button type="button" onClick={clearPrompt} aria-label="Remove prompt">
+                <X size={11} />
+              </button>
+            </span>
+          )}
           {engine.attachments.map((attachment) => (
             <span key={attachment.path} className={cn('attachment-chip', !attachment.enabled && 'attachment-chip-off')}>
               <button type="button" onClick={() => engine.toggleAttachment(attachment.path)} title={attachment.enabled ? 'Included in the next message' : 'Not included'}>
@@ -214,10 +246,17 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
           >
             <Paperclip size={15} />
           </button>
-          <button type="button" className="icon-btn" title="Explain step by step" onClick={explain} disabled={!value.trim() || engine.busy}>
+          <button type="button" className="icon-btn" title="Explain step by step" onClick={explain} disabled={!draft || engine.busy}>
             <BookOpenCheck size={15} />
           </button>
-          <button type="button" className="icon-btn" title="Prompts" aria-label="Prompts" onClick={() => setPromptsOpen(true)} disabled={engine.busy}>
+          <button
+            type="button"
+            className={cn('icon-btn', activePreset && 'icon-btn-accent')}
+            title={activePreset ? `Prompts — ${activePreset.label} enabled` : 'Prompts'}
+            aria-label="Prompts"
+            onClick={() => setPromptsOpen(true)}
+            disabled={engine.busy}
+          >
             <Wand2 size={15} />
           </button>
           {engine.busy ? (
