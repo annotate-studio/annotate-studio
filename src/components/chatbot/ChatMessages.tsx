@@ -3,6 +3,7 @@
 import React, { memo, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, BookOpenCheck, Check, Copy, FileText, Layers, RotateCcw } from 'lucide-react';
 import MarkdownRenderer from '@/components/markdown/MarkdownRenderer';
+import VisualizationView from './VisualizationView';
 import type { ChatMessage } from '@/store/sessions';
 import { useApp } from '@/store/app';
 import { copyText, cn, isRtlText } from '@/lib/utils';
@@ -60,7 +61,11 @@ const MessageBubble = memo(function MessageBubble({
             <AlertTriangle size={14} /> {message.stopped ? 'Stopped' : 'Something went wrong'}
           </div>
         )}
-        <MarkdownRenderer content={message.content} />
+        {message.visualization ? (
+          <VisualizationView data={message.visualization} />
+        ) : (
+          <MarkdownRenderer content={message.content} />
+        )}
         {message.explainer && (
           <button type="button" className="chip-button chip-button-primary" onClick={() => onOpenLesson(message.explainer!.topic, message.explainer!.steps)}>
             <BookOpenCheck size={13} /> Open lesson

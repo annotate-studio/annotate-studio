@@ -13,12 +13,15 @@ import {
 import {
   attachmentBlock,
   EXPLAINER_PROMPT,
+  extractJson,
   splitLesson,
   STUDY_ASSISTANT_PROMPT,
   SUMMARY_PROMPT,
   trimHistory,
   wantsFlashcards,
 } from '@/lib/ai';
+import { buildPromptSystemMessage, getPreset, type PromptId } from '@/lib/promptPresets';
+import { parseVisualization, visualizationToText } from '@/lib/visualizations';
 import { hasReadableText } from '@/lib/pdf-engine';
 import { readDocumentText } from '@/lib/workspace-actions';
 import { baseName, stripExtension, uid } from '@/lib/utils';
@@ -412,6 +415,92 @@ export function useChatEngine() {
     }
   }, []);
 
+  const recentConversation = (sessionId: string): string => {
+    const messages = useChatSessions.getState().sessions.find((s) => s.id === sessionId)?.messages ?? [];
+    const recent = messages.slice(Math.max(0, messages.length - 8), -1).filter((message) => !message.error);
+    return recent.map((message) => `${message.role === 'user' ? 'Student' : 'Assistant'}: ${message.content}`).join('\n\n');
+  };
+
+  const runPrompt = useCallback(
+    async (presetId: PromptId, options: { text?: string; context?: string; path?: string } = {}) => {
+      const preset = getPreset(presetId);
+      if (!preset) return;
+      const typed = (options.text ?? '').trim();
+      supersede();
+      const sessions = useChatSessions.getState();
+      const sessionId = sessions.ensureSession();
+      const active = options.path || options.context ? [] : attachmentsRef.current.filter((a) => a.enabled);
+      sessions.appendMessage(sessionId, {
+        role: 'user',
+        content: typed ? `${preset.label}: ${typed}` : preset.label,
+        ...(active.length ? { attachments: active.map((a) => a.name) } : {}),
+        replay: { kind: 'prompt', preset: presetId, text: options.text, context: options.context, path: options.path },
+      });
+      const id = begin(`Running ${preset.label}…`, sessionId);
+      try {
+        let material = '';
+        let extra = '';
+        if (options.path) {
+          setStatus(`Reading ${baseName(options.path)}…`);
+          const document = await readCached(options.path, 60_000);
+          if (!hasReadableText(document.text)) {
+            throw new Error(`${baseName(options.path)} has no extractable text. Scanned PDFs and images cannot be processed yet.`);
+          }
+          material = attachmentBlock(baseName(options.path), document.text, document.truncated ? 'truncated' : undefined);
+          extra = typed;
+        } else if (options.context) {
+          material = attachmentBlock('Selected passage', options.context);
+          extra = typed;
+        } else if (active.length) {
+          material = await buildContext(active, 60_000);
+          extra = typed;
+        } else if (typed.length >= 400) {
+          material = attachmentBlock('Provided text', typed);
+        } else if (typed) {
+          material = recentConversation(sessionId);
+          extra = typed;
+        } else {
+          material = recentConversation(sessionId);
+        }
+        const userContent = material && extra ? `${material}\n\nAdditional focus: ${extra}` : material || extra;
+        if (!userContent.trim()) {
+          throw new Error('There is nothing to work with yet — attach a document, paste some text, or ask a question first.');
+        }
+        if (id !== requestRef.current) return;
+        setStatus(`Running ${preset.label}…`);
+        const response = await aiChat(
+          [
+            { role: 'system', content: buildPromptSystemMessage(preset) },
+            { role: 'user', content: userContent },
+          ],
+          { model: model(), temperature: preset.temperature, maxTokens: 6000 },
+        );
+        if (id !== requestRef.current) return;
+        const visualization = parseVisualization(extractJson(response.content));
+        if (visualization) {
+          useChatSessions.getState().appendMessage(sessionId, {
+            role: 'assistant',
+            content: visualizationToText(visualization),
+            visualization,
+          });
+        } else {
+          const raw = response.content.trim();
+          const fenced = raw.startsWith('{') || raw.startsWith('[') ? `\`\`\`json\n${raw}\n\`\`\`` : raw;
+          useChatSessions.getState().appendMessage(sessionId, {
+            role: 'assistant',
+            content: `I could not turn that into a **${preset.label}** view, so here is the raw answer:\n\n${fenced}`,
+          });
+        }
+      } catch (error) {
+        if (id !== requestRef.current) return;
+        useChatSessions.getState().appendMessage(sessionId, { role: 'assistant', content: errorMessage(error), error: true });
+      } finally {
+        finish(id);
+      }
+    },
+    [],
+  );
+
   const retry = useCallback(
     async (messageId: string) => {
       const sessions = useChatSessions.getState();
@@ -429,9 +518,10 @@ export function useChatEngine() {
       if (!replay) await send(lastUser.content);
       else if (replay.kind === 'summarize') await summarize(replay.title, replay.path, replay.text);
       else if (replay.kind === 'explain') await explain(replay.topic, { context: replay.context, path: replay.path });
+      else if (replay.kind === 'prompt') await runPrompt(replay.preset, { text: replay.text, context: replay.context, path: replay.path });
       else await makeFlashcards(replay);
     },
-    [send, summarize, explain, makeFlashcards],
+    [send, summarize, explain, runPrompt, makeFlashcards],
   );
 
   const openLesson = useCallback((topic: string, steps: string[]) => {
@@ -481,6 +571,7 @@ export function useChatEngine() {
     cancel,
     summarize,
     explain,
+    runPrompt,
     openLesson,
     askLesson,
     makeFlashcards,

@@ -7,11 +7,14 @@ import {
 } from '@/lib/tauri-commands';
 import { createSaver } from '@/lib/persist';
 import { uid } from '@/lib/utils';
+import { isPromptId, type PromptId } from '@/lib/promptPresets';
+import { parseVisualization, type Visualization } from '@/lib/visualizations';
 
 export type ChatReplay =
   | { kind: 'summarize'; title: string; path?: string; text?: string }
   | { kind: 'explain'; topic: string; context?: string; path?: string }
-  | { kind: 'flashcards'; instructions?: string; text?: string; path?: string; title?: string; announce?: string };
+  | { kind: 'flashcards'; instructions?: string; text?: string; path?: string; title?: string; announce?: string }
+  | { kind: 'prompt'; preset: PromptId; text?: string; context?: string; path?: string };
 
 export interface ChatMessage {
   id: string;
@@ -21,6 +24,7 @@ export interface ChatMessage {
   attachments?: string[];
   explainer?: { topic: string; steps: string[] };
   flashcards?: { count: number; collectionName: string };
+  visualization?: Visualization;
   replay?: ChatReplay;
   error?: boolean;
   stopped?: boolean;
@@ -48,6 +52,9 @@ function migrateReplay(raw: unknown): ChatReplay | undefined {
       title: optionalString(data.title),
       announce: optionalString(data.announce),
     };
+  }
+  if (data.kind === 'prompt' && isPromptId(data.preset)) {
+    return { kind: 'prompt', preset: data.preset, text: optionalString(data.text), context: optionalString(data.context), path: optionalString(data.path) };
   }
   return undefined;
 }
@@ -96,6 +103,8 @@ function migrateMessage(raw: unknown): ChatMessage | null {
     message.flashcards = { count, collectionName: cards.collectionName };
   }
   if (Array.isArray(data.attachments)) message.attachments = data.attachments.filter((a): a is string => typeof a === 'string');
+  const visualization = parseVisualization(data.visualization);
+  if (visualization) message.visualization = visualization;
   const replay = migrateReplay(data.replay);
   if (replay) message.replay = replay;
   if (data.error === true) message.error = true;

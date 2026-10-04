@@ -1,9 +1,12 @@
 'use client';
 
 import React, { forwardRef, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { ArrowUp, BookOpenCheck, FileText, Paperclip, Square, X } from 'lucide-react';
+import { ArrowUp, BookOpenCheck, FileText, Paperclip, Square, Wand2, X } from 'lucide-react';
 import type { ChatEngine } from './useChatEngine';
+import PromptsDialog from './PromptsDialog';
+import type { PromptId } from '@/lib/promptPresets';
 import { useLibrary } from '@/store/library';
+import { useChatSessions } from '@/store/sessions';
 import type { StudyFile } from '@/lib/tauri-commands';
 import { cn, isRtlText } from '@/lib/utils';
 
@@ -20,8 +23,13 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
   const [value, setValue] = useState('');
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
   const [highlight, setHighlight] = useState(0);
+  const [promptsOpen, setPromptsOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const files = useLibrary((state) => state.files);
+  const hasConversation = useChatSessions((state) => {
+    const session = state.sessions.find((item) => item.id === state.activeId);
+    return (session?.messages ?? []).some((message) => !message.error);
+  });
 
   const resize = () => {
     const element = textareaRef.current;
@@ -93,6 +101,25 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
     requestAnimationFrame(resize);
     void engine.explain(text);
   };
+
+  const pickPrompt = (preset: PromptId) => {
+    setPromptsOpen(false);
+    if (engine.busy) return;
+    const text = value.trim();
+    setValue('');
+    setMention(null);
+    requestAnimationFrame(resize);
+    void engine.runPrompt(preset, { text });
+  };
+
+  const activeAttachments = engine.attachments.filter((attachment) => attachment.enabled).length;
+  const promptHint = activeAttachments
+    ? `Runs on ${activeAttachments} attached document${activeAttachments === 1 ? '' : 's'}${value.trim() ? ' and your message.' : '.'}`
+    : value.trim()
+      ? 'Runs on the text in the message box.'
+      : hasConversation
+        ? 'Runs on the latest messages in this chat.'
+        : 'Attach a document, paste some text, or ask a question first.';
 
   return (
     <div className="chat-composer">
@@ -190,6 +217,9 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
           <button type="button" className="icon-btn" title="Explain step by step" onClick={explain} disabled={!value.trim() || engine.busy}>
             <BookOpenCheck size={15} />
           </button>
+          <button type="button" className="icon-btn" title="Prompts" aria-label="Prompts" onClick={() => setPromptsOpen(true)} disabled={engine.busy}>
+            <Wand2 size={15} />
+          </button>
           {engine.busy ? (
             <button type="button" className="send-btn send-btn-stop" onClick={engine.cancel} title="Stop">
               <Square size={13} />
@@ -201,6 +231,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
           )}
         </div>
       </div>
+      <PromptsDialog open={promptsOpen} onClose={() => setPromptsOpen(false)} onPick={pickPrompt} hint={promptHint} />
     </div>
   );
 });
