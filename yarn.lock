@@ -716,7 +716,7 @@
     postcss "^8.5.16"
     tailwindcss "4.3.3"
 
-"@tauri-apps/api@^2.0.0", "@tauri-apps/api@^2.10.1", "@tauri-apps/api@^2.11.0", "@tauri-apps/api@^2.12.0":
+"@tauri-apps/api@^2.0.0", "@tauri-apps/api@^2.12.0":
   version "2.12.0"
   resolved "https://registry.npmjs.org/@tauri-apps/api/-/api-2.12.0.tgz"
   integrity sha512-fUSxFX8VABYe9W9K5ROdEaKVkNUFRcMSRofjruvaxztXA+I0XnQHcYHF8m/a6iExRUxsUf0HsFWhPBuH9IgzJw==
@@ -793,19 +793,19 @@
     "@tauri-apps/cli-win32-ia32-msvc" "2.12.0"
     "@tauri-apps/cli-win32-x64-msvc" "2.12.0"
 
-"@tauri-apps/plugin-dialog@^2.7.2":
-  version "2.7.2"
-  resolved "https://registry.npmjs.org/@tauri-apps/plugin-dialog/-/plugin-dialog-2.7.2.tgz"
-  integrity sha512-pX0IGm1I3I6wc+zeKYcq1GSqogK6okCNX5fOdaNU5ab1AjGS6l1E5wFNjEb7meg7ZFSp0JUs+0jQGQNyOvLrsg==
+"@tauri-apps/plugin-dialog@^2.8.1":
+  version "2.8.1"
+  resolved "https://registry.yarnpkg.com/@tauri-apps/plugin-dialog/-/plugin-dialog-2.8.1.tgz#f29f3c28862a1ed767b6fd241f34abf26129f88f"
+  integrity sha512-/DtE3B62JgpYuWFL5ATXM6KOXUq7pca7cJWOgSqULhZsgyjLk0PWKek1dbRDvhNBW6flNsOfWphsKnb+738Dmw==
   dependencies:
-    "@tauri-apps/api" "^2.11.0"
+    "@tauri-apps/api" "^2.12.0"
 
-"@tauri-apps/plugin-fs@^2.5.1":
-  version "2.5.1"
-  resolved "https://registry.npmjs.org/@tauri-apps/plugin-fs/-/plugin-fs-2.5.1.tgz"
-  integrity sha512-9Lz+Jopp6QyeEWhlpkMx4R/+P9HgR+AVAI4vOZhlT8Xaymtz8iVI/Ov984/XTqgJz/5gz5NretqPB/XEMS3NhQ==
+"@tauri-apps/plugin-fs@^2.6.0":
+  version "2.6.0"
+  resolved "https://registry.yarnpkg.com/@tauri-apps/plugin-fs/-/plugin-fs-2.6.0.tgz#44e6f5e02f22a3b800b4cc70060f45348dee45f3"
+  integrity sha512-MhBAZ4rryd+h9fijd/GWDfArqiAeGI0ZNduV4wuRyUVI6wDZ+oDBY7atqtoXKDwlTUVSvpvmWJAY0ehQd/v6Uw==
   dependencies:
-    "@tauri-apps/api" "^2.11.0"
+    "@tauri-apps/api" "^2.12.0"
 
 "@tauri-apps/plugin-notification@^2.3.3":
   version "2.5.0"
@@ -814,12 +814,12 @@
   dependencies:
     "@tauri-apps/api" "^2.12.0"
 
-"@tauri-apps/plugin-shell@^2.0.0":
-  version "2.3.5"
-  resolved "https://registry.npmjs.org/@tauri-apps/plugin-shell/-/plugin-shell-2.3.5.tgz"
-  integrity sha512-jewtULhiQ7lI7+owCKAjc8tYLJr92U16bPOeAa472LHJdgaibLP83NcfAF2e+wkEcA53FxKQAZ7byDzs2eeizg==
+"@tauri-apps/plugin-shell@^2.4.0":
+  version "2.4.0"
+  resolved "https://registry.yarnpkg.com/@tauri-apps/plugin-shell/-/plugin-shell-2.4.0.tgz#ac8a9c5890cb2afe44bc4218b8f76d0be16e6f56"
+  integrity sha512-kto+mIv8reX1iryIDdjfsdv3l3BtMN0tvQ6dhs3uMO1MgjvdHsD9zql4cBE6W44qnRw/GMtsiThWsgcQASd+ig==
   dependencies:
-    "@tauri-apps/api" "^2.10.1"
+    "@tauri-apps/api" "^2.12.0"
 
 "@tybys/wasm-util@^0.10.2", "@tybys/wasm-util@^0.10.3":
   version "0.10.4"
