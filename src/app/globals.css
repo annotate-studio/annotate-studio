@@ -821,11 +821,6 @@ kbd {
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
-.input:focus,
-.select:focus {
-  box-shadow: var(--focus-ring);
-}
-
 .input::placeholder,
 .textarea::placeholder {
   color: var(--text-muted);
@@ -3046,10 +3041,6 @@ input[type='checkbox'] {
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
-.chat-input-row:focus-within {
-  box-shadow: var(--focus-ring);
-}
-
 .chat-input-row textarea {
   flex: 1;
   min-height: 32px;
@@ -3892,13 +3883,47 @@ input[type='checkbox'] {
   white-space: nowrap;
 }
 
-.side-item-menu {
-  opacity: 0;
-  margin-right: 4px;
+.side-item-trailing {
+  display: grid;
+  place-items: center end;
+  min-width: 40px;
+  padding-right: 4px;
 }
 
-.side-item:hover .side-item-menu {
+.side-item-trailing > * {
+  grid-area: 1 / 1;
+}
+
+.side-item-trailing .count-badge,
+.side-item-menu {
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.side-item-trailing .count-badge:not(.count-badge-due) {
+  background: transparent;
+}
+
+.side-item-menu {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.side-item-menuable .side-item-menu,
+.side-item-menuable .side-item-menu:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.side-item-menuable:hover .count-badge,
+.side-item-menuable:focus-within .count-badge {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.side-item-menuable:hover .side-item-menu,
+.side-item-menuable:focus-within .side-item-menu {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .side-empty {
@@ -3948,6 +3973,18 @@ input[type='checkbox'] {
   justify-content: center;
 }
 
+.page-center {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.page-center > .empty-state {
+  margin-top: auto;
+  margin-bottom: auto;
+  padding: 24px 20px;
+}
+
 .list-empty {
   padding: 30px;
   text-align: center;
@@ -3962,6 +3999,11 @@ input[type='checkbox'] {
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 14px;
+}
+
+.list-controls .search-field,
+.library-controls .search-field {
+  max-width: none;
 }
 
 .library-controls .select {
@@ -4827,7 +4869,9 @@ input[type='checkbox'] {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 380px);
   gap: 24px;
-  align-items: start;
+  align-items: center;
+  align-content: center;
+  min-height: 100%;
 }
 
 @media (max-width: 1000px) {

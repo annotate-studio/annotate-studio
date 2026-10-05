@@ -34,6 +34,7 @@ interface FlashcardStore {
   renameCollection: (id: string, name: string) => void;
   setReviewPeriod: (id: string, days: number) => void;
   deleteCollection: (id: string) => Promise<void>;
+  clearCollection: (id: string) => Promise<void>;
   addCards: (cards: Flashcard[]) => void;
   upsertCard: (card: Flashcard) => void;
   removeCard: (id: string) => void;
@@ -143,6 +144,10 @@ export const useFlashcards = create<FlashcardStore>((set, get) => ({
       cards: state.cards.filter((card) => card.collectionId !== id),
       activeCollectionId: state.activeCollectionId === id ? null : state.activeCollectionId,
     }));
+  },
+  clearCollection: async (id) => {
+    await deleteFlashcardsByCollection(id);
+    set((state) => ({ cards: state.cards.filter((card) => card.collectionId !== id) }));
   },
   addCards: (cards) =>
     set((state) => {

@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ChevronDown,
   Clock,
+  Eraser,
   Inbox,
   Layers,
   Library,
@@ -11,14 +12,13 @@ import {
   Pencil,
   Play,
   Plus,
-  RotateCcw,
   Search,
   Sparkles,
   Trash2,
 } from 'lucide-react';
 import MarkdownRenderer from '@/components/markdown/MarkdownRenderer';
 import { openContextMenu, type MenuEntry } from '@/components/ui/ContextMenu';
-import { deleteFlashcard, resetFlashcards, type Flashcard } from '@/lib/tauri-commands';
+import { deleteFlashcard, type Flashcard } from '@/lib/tauri-commands';
 import {
   cardsInCollection,
   isDue,
@@ -53,19 +53,21 @@ function CollectionItem({
   onMenu?: (event: React.MouseEvent) => void;
 }) {
   return (
-    <div className={cn('side-item', active && 'side-item-active')}>
+    <div className={cn('side-item', active && 'side-item-active', onMenu && 'side-item-menuable')}>
       <button type="button" className="side-item-main" onClick={onClick} onContextMenu={onMenu}>
         {icon}
         <span className="side-item-label" dir="auto">
           {label}
         </span>
-        {due > 0 ? <span className="count-badge count-badge-due">{due}</span> : <span className="count-badge">{count}</span>}
       </button>
-      {onMenu && (
-        <button type="button" className="icon-btn icon-btn-sm side-item-menu" onClick={onMenu} title="Collection actions">
-          <MoreHorizontal size={14} />
-        </button>
-      )}
+      <div className="side-item-trailing">
+        {due > 0 ? <span className="count-badge count-badge-due">{due}</span> : <span className="count-badge">{count}</span>}
+        {onMenu && (
+          <button type="button" className="icon-btn icon-btn-sm side-item-menu" onClick={onMenu} title="Collection actions">
+            <MoreHorizontal size={14} />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -174,22 +176,26 @@ export default function FlashcardsTab() {
         },
       },
       {
-        label: 'Reset progress…',
-        icon: <RotateCcw size={13} />,
+        label: 'Clear…',
+        icon: <Eraser size={13} />,
+        danger: true,
         onSelect: async () => {
+          const count = cards.filter((card) => card.collectionId === id).length;
           const ok = await confirmDialog({
-            title: `Reset progress for “${name}”?`,
-            message: 'Every card in this collection becomes new and due now. Review history is cleared.',
-            confirmLabel: 'Reset progress',
+            title: `Clear “${name}”?`,
+            message:
+              count > 0
+                ? `Deletes all ${count} card${count === 1 ? '' : 's'} in this collection. The collection itself stays.`
+                : 'This collection is empty.',
+            confirmLabel: 'Clear',
             danger: true,
           });
           if (!ok) return;
           try {
-            await resetFlashcards(id);
-            await useFlashcards.getState().refreshCards();
-            toast.success('Progress reset');
+            await useFlashcards.getState().clearCollection(id);
+            toast.success('Collection cleared');
           } catch (error) {
-            toast.error('Reset failed', error);
+            toast.error('Clear failed', error);
           }
         },
       },
@@ -290,7 +296,7 @@ export default function FlashcardsTab() {
         </div>
       </aside>
 
-      <section className="page">
+      <section className={cn('page', scoped.length === 0 && 'page-center')}>
         <header className="page-header">
           <div>
             <h1 dir="auto">{title}</h1>

@@ -33,6 +33,7 @@ import {
   pickAndImport,
   renameFile,
   resourceTypeFor,
+  revealInExplorer,
 } from '@/lib/workspace-actions';
 import { cn, formatBytes, formatRelativeTime, stripExtension } from '@/lib/utils';
 
@@ -129,7 +130,8 @@ export default function LibraryTab() {
         { label: 'Make flashcards', icon: <Layers size={13} />, onSelect: () => requestChat({ kind: 'flashcards', title: file.name, text: '', path: file.path }) },
       );
     }
-    items.push('separator', { label: 'Rename…', icon: <Pencil size={13} />, onSelect: () => void rename(file) });
+    items.push('separator', { label: 'View in explorer', icon: <FolderOpen size={13} />, onSelect: () => void revealInExplorer(file.path) });
+    items.push({ label: 'Rename…', icon: <Pencil size={13} />, onSelect: () => void rename(file) });
     items.push({ label: 'Delete…', icon: <Trash2 size={13} />, danger: true, onSelect: () => void remove(file) });
     return items;
   };

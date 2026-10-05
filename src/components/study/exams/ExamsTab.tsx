@@ -94,8 +94,10 @@ export default function ExamsTab() {
     return <ExamResults exam={exam} onBack={() => setScreen({ kind: 'list' })} onRetake={() => start(exam)} />;
   }
 
+  const empty = hydrated && exams.length === 0;
+
   return (
-    <div className="page">
+    <div className={cn('page', empty && 'page-center')}>
       <header className="page-header">
         <div>
           <h1>Exams</h1>
@@ -115,7 +117,7 @@ export default function ExamsTab() {
         </div>
       </header>
 
-      {hydrated && exams.length === 0 ? (
+      {empty ? (
         <div className="empty-state">
           <FileQuestion size={40} strokeWidth={1.4} />
           <h2>No exams yet</h2>

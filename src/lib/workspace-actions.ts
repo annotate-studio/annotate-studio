@@ -201,6 +201,22 @@ export async function deleteFile(path: string): Promise<boolean> {
   }
 }
 
+function parentDirectoryOf(path: string): string {
+  const cleaned = path.replace(/[\\/]+$/, '');
+  const index = Math.max(cleaned.lastIndexOf('/'), cleaned.lastIndexOf('\\'));
+  return index > 0 ? cleaned.slice(0, index) : cleaned;
+}
+
+export async function revealInExplorer(path: string): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    const { open } = await import('@tauri-apps/plugin-shell');
+    await open(parentDirectoryOf(path));
+  } catch (error) {
+    toast.error('Could not open the file location', error);
+  }
+}
+
 export async function migrateInlineNotes(): Promise<void> {
   const { workspaces } = useCanvas.getState();
   for (const workspace of workspaces) {
