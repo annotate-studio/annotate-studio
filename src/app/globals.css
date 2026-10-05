@@ -25,6 +25,7 @@
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
   --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.06);
   --shadow-lg: 0 18px 50px rgba(15, 23, 42, 0.16), 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-dropdown: 0 12px 30px rgba(15, 23, 42, 0.11), 0 2px 6px rgba(15, 23, 42, 0.05);
 
   --primary: #2563eb;
   --primary-text: #ffffff;
@@ -70,6 +71,7 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.6);
+  --shadow-dropdown: 0 14px 34px rgba(0, 0, 0, 0.45);
   --active-line: rgba(255, 255, 255, 0.035);
 }
 
@@ -821,7 +823,6 @@ kbd {
 
 .input:focus,
 .select:focus {
-  border-color: var(--primary-border);
   box-shadow: var(--focus-ring);
 }
 
@@ -1284,7 +1285,7 @@ input[type='checkbox'] {
   border-radius: var(--radius-md);
   background: var(--bg-card);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-dropdown);
   animation: pop-in 0.12s ease-out;
   overflow: hidden;
 }
@@ -1302,7 +1303,7 @@ input[type='checkbox'] {
   border-radius: var(--radius-md);
   background: var(--bg-card);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-dropdown);
   animation: pop-in 0.1s ease-out;
   max-width: 320px;
 }
@@ -1876,8 +1877,7 @@ input[type='checkbox'] {
 }
 
 .cw-selected {
-  border-color: var(--primary-border);
-  box-shadow: var(--shadow-lg), 0 0 0 1px var(--primary-border);
+  box-shadow: var(--shadow-lg);
 }
 
 .cw-maximized {
@@ -1893,7 +1893,7 @@ input[type='checkbox'] {
 
 .cw-dragging,
 .cw-resizing {
-  box-shadow: var(--shadow-lg), 0 0 0 1px var(--primary-border);
+  box-shadow: var(--shadow-lg);
   user-select: none;
 }
 
@@ -2098,10 +2098,6 @@ input[type='checkbox'] {
   outline: none;
 }
 
-.page-input:focus {
-  border-color: var(--primary-border);
-}
-
 .page-total {
   font-size: 12px;
   color: var(--text-muted);
@@ -2202,7 +2198,7 @@ input[type='checkbox'] {
   border-radius: var(--radius-md);
   background: var(--bg-card);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-dropdown);
   pointer-events: auto;
   white-space: nowrap;
   z-index: 30;
@@ -2344,7 +2340,7 @@ input[type='checkbox'] {
   border-radius: var(--radius-sm) !important;
   border: 1px solid var(--border) !important;
   background: var(--bg-card) !important;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-dropdown);
   overflow: hidden;
   font-family: var(--font-sans);
   z-index: 1400 !important;
@@ -3051,7 +3047,6 @@ input[type='checkbox'] {
 }
 
 .chat-input-row:focus-within {
-  border-color: var(--primary-border);
   box-shadow: var(--focus-ring);
 }
 
@@ -3090,7 +3085,7 @@ input[type='checkbox'] {
   border-radius: var(--radius-md);
   background: var(--bg-card);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-dropdown);
 }
 
 .send-btn {
