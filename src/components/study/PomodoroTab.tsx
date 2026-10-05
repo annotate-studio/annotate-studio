@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Bell, Brain, Coffee, Flame, Pause, Play, RotateCcw, SkipForward, Volume2 } from 'lucide-react';
+import { Bell, Brain, Coffee, Flame, Pause, Play, RotateCcw, Settings, SkipForward, Volume2 } from 'lucide-react';
 import { phaseSeconds, today, usePomodoro, type PomodoroPhase } from '@/store/pomodoro';
 import { POMODORO_SOUNDS, useSettings, type PomodoroSound } from '@/store/settings';
 import { getStudyStats, type StudyStats } from '@/lib/tauri-commands';
 import { playChime } from '@/lib/sound';
 import { cn, formatDuration } from '@/lib/utils';
+import Dialog from '@/components/ui/Dialog';
 
 const PHASES: { id: PomodoroPhase; label: string; icon: React.ReactNode }[] = [
   { id: 'focus', label: 'Focus', icon: <Brain size={15} /> },
@@ -44,6 +45,56 @@ function NumberField({ label, value, min, max, onChange }: { label: string; valu
   );
 }
 
+function TimerSettingsBody() {
+  const settings = useSettings((state) => state.pomodoro);
+  const updatePomodoro = useSettings((state) => state.updatePomodoro);
+  const notificationsEnabled = useSettings((state) => state.notificationsEnabled);
+  const update = useSettings((state) => state.update);
+
+  return (
+    <div className="pomodoro-settings">
+      <div className="form-grid form-grid-3">
+        <NumberField label="Focus (min)" value={settings.focusMinutes} min={1} max={180} onChange={(v) => updatePomodoro({ focusMinutes: v })} />
+        <NumberField label="Short break (min)" value={settings.shortBreakMinutes} min={1} max={60} onChange={(v) => updatePomodoro({ shortBreakMinutes: v })} />
+        <NumberField label="Long break (min)" value={settings.longBreakMinutes} min={1} max={120} onChange={(v) => updatePomodoro({ longBreakMinutes: v })} />
+        <NumberField label="Long break every" value={settings.longBreakEvery} min={2} max={12} onChange={(v) => updatePomodoro({ longBreakEvery: v })} />
+      </div>
+      <label className="checkbox-row">
+        <input type="checkbox" checked={settings.autoStartBreaks} onChange={(event) => updatePomodoro({ autoStartBreaks: event.target.checked })} />
+        Start breaks automatically
+      </label>
+      <label className="checkbox-row">
+        <input type="checkbox" checked={settings.autoStartFocus} onChange={(event) => updatePomodoro({ autoStartFocus: event.target.checked })} />
+        Start the next focus session automatically
+      </label>
+      <label className="checkbox-row">
+        <input type="checkbox" checked={notificationsEnabled} onChange={(event) => update({ notificationsEnabled: event.target.checked })} />
+        <Bell size={14} /> Desktop notifications
+      </label>
+      <div className="field">
+        <span className="field-label">
+          <Volume2 size={13} /> Sound
+        </span>
+        <div className="chip-row">
+          {POMODORO_SOUNDS.map((sound) => (
+            <button
+              key={sound}
+              type="button"
+              className={cn('chip', settings.sound === sound && 'chip-active')}
+              onClick={() => {
+                updatePomodoro({ sound: sound as PomodoroSound });
+                playChime(sound as PomodoroSound);
+              }}
+            >
+              {sound === 'none' ? 'Silent' : sound[0].toUpperCase() + sound.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PomodoroTab() {
   const phase = usePomodoro((state) => state.phase);
   const status = usePomodoro((state) => state.status);
@@ -51,10 +102,8 @@ export default function PomodoroTab() {
   const completedToday = usePomodoro((state) => (state.day === today() ? state.completedToday : 0));
   const focusStreak = usePomodoro((state) => state.focusStreak);
   const settings = useSettings((state) => state.pomodoro);
-  const updatePomodoro = useSettings((state) => state.updatePomodoro);
-  const notificationsEnabled = useSettings((state) => state.notificationsEnabled);
-  const update = useSettings((state) => state.update);
   const [stats, setStats] = useState<StudyStats | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     usePomodoro.getState().syncDuration();
@@ -73,20 +122,31 @@ export default function PomodoroTab() {
   return (
     <div className="page pomodoro-page">
       <div className="pomodoro-card">
-        <div className="segmented segmented-full">
-          {PHASES.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              className={cn(phase === entry.id && 'active')}
-              onClick={() => {
-                if (status === 'running' && phase === entry.id) return;
-                usePomodoro.setState({ phase: entry.id, status: 'idle', endsAt: null, remaining: phaseSeconds(entry.id, settings) });
-              }}
-            >
-              {entry.icon} {entry.label}
-            </button>
-          ))}
+        <div className="pomodoro-topbar">
+          <div className="segmented segmented-full">
+            {PHASES.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                className={cn(phase === entry.id && 'active')}
+                onClick={() => {
+                  if (status === 'running' && phase === entry.id) return;
+                  usePomodoro.setState({ phase: entry.id, status: 'idle', endsAt: null, remaining: phaseSeconds(entry.id, settings) });
+                }}
+              >
+                {entry.icon} {entry.label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            title="Timer settings"
+            aria-label="Timer settings"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <Settings size={16} />
+          </button>
         </div>
 
         <div className={cn('timer-ring', `timer-${phase}`)}>
@@ -150,47 +210,19 @@ export default function PomodoroTab() {
         </div>
       </div>
 
-      <div className="pomodoro-settings">
-        <h2>Timer settings</h2>
-        <div className="form-grid form-grid-3">
-          <NumberField label="Focus (min)" value={settings.focusMinutes} min={1} max={180} onChange={(v) => updatePomodoro({ focusMinutes: v })} />
-          <NumberField label="Short break (min)" value={settings.shortBreakMinutes} min={1} max={60} onChange={(v) => updatePomodoro({ shortBreakMinutes: v })} />
-          <NumberField label="Long break (min)" value={settings.longBreakMinutes} min={1} max={120} onChange={(v) => updatePomodoro({ longBreakMinutes: v })} />
-          <NumberField label="Long break every" value={settings.longBreakEvery} min={2} max={12} onChange={(v) => updatePomodoro({ longBreakEvery: v })} />
-        </div>
-        <label className="checkbox-row">
-          <input type="checkbox" checked={settings.autoStartBreaks} onChange={(event) => updatePomodoro({ autoStartBreaks: event.target.checked })} />
-          Start breaks automatically
-        </label>
-        <label className="checkbox-row">
-          <input type="checkbox" checked={settings.autoStartFocus} onChange={(event) => updatePomodoro({ autoStartFocus: event.target.checked })} />
-          Start the next focus session automatically
-        </label>
-        <label className="checkbox-row">
-          <input type="checkbox" checked={notificationsEnabled} onChange={(event) => update({ notificationsEnabled: event.target.checked })} />
-          <Bell size={14} /> Desktop notifications
-        </label>
-        <div className="field">
-          <span className="field-label">
-            <Volume2 size={13} /> Sound
-          </span>
-          <div className="chip-row">
-            {POMODORO_SOUNDS.map((sound) => (
-              <button
-                key={sound}
-                type="button"
-                className={cn('chip', settings.sound === sound && 'chip-active')}
-                onClick={() => {
-                  updatePomodoro({ sound: sound as PomodoroSound });
-                  playChime(sound as PomodoroSound);
-                }}
-              >
-                {sound === 'none' ? 'Silent' : sound[0].toUpperCase() + sound.slice(1)}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      <Dialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        title="Timer settings"
+        width={560}
+        footer={
+          <button type="button" className="btn btn-primary" onClick={() => setSettingsOpen(false)}>
+            Done
+          </button>
+        }
+      >
+        <TimerSettingsBody />
+      </Dialog>
     </div>
   );
 }

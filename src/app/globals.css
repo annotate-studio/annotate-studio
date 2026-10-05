@@ -4866,33 +4866,36 @@ input[type='checkbox'] {
 }
 
 .pomodoro-page {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 380px);
-  gap: 24px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  align-content: center;
+  justify-content: center;
   min-height: 100%;
 }
 
-@media (max-width: 1000px) {
-  .pomodoro-page {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.pomodoro-card,
-.pomodoro-settings {
+.pomodoro-card {
+  width: 100%;
+  max-width: 720px;
   padding: 24px;
   border-radius: var(--radius-xl);
   border: 1px solid var(--border);
   background: var(--bg-card);
-}
-
-.pomodoro-card {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 24px;
+}
+
+.pomodoro-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.pomodoro-topbar .segmented-full {
+  flex: 1;
+  min-width: 0;
 }
 
 .timer-ring {
@@ -4986,11 +4989,6 @@ input[type='checkbox'] {
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-.pomodoro-settings h2 {
-  font-size: 16px;
-  font-weight: 650;
 }
 
 .motivation-grid {
