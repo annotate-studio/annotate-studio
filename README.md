@@ -134,7 +134,7 @@ The long-term goal is not simply to add more AI features, but to build a learnin
 
 [I](https://github.com/tahadostifam) built Annotate Studio to bring together the study tools I personally needed in one place: spaced-repetition flashcards, exam practice, PDF annotation, a Pomodoro timer, and optional AI assistance. I decided to make it open source so that other students could benefit from it as well.
 
-I also want to give my sincere thanks to CluvexStudio for the passionate work put into improving and testing Annotate Studio. His time, feedback, testing, and attention to detail have helped make the application better throughout its development. I genuinely appreciate the effort and care they have put into the project.
+I also want to give my sincere thanks to [CluvexStudio](https://github.com/CluvexStudio) for the passionate work put into improving and testing Annotate Studio. His time, feedback, testing, and attention to detail have helped make the application better throughout its development. I genuinely appreciate the effort and care they have put into the project.
 
 ## Contribution
 
