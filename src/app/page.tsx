@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 const CanvasZone = dynamic(() => import('@/components/canvas/CanvasZone'), { ssr: false });
 const ChatPanel = dynamic(() => import('@/components/chatbot/ChatPanel'), { ssr: false });
 const LibraryTab = dynamic(() => import('@/components/study/LibraryTab'), { ssr: false });
+const OcrTab = dynamic(() => import('@/components/study/OcrTab'), { ssr: false });
 const FlashcardsTab = dynamic(() => import('@/components/study/flashcards/FlashcardsTab'), { ssr: false });
 const ExamsTab = dynamic(() => import('@/components/study/exams/ExamsTab'), { ssr: false });
 const PomodoroTab = dynamic(() => import('@/components/study/PomodoroTab'), { ssr: false });
@@ -39,6 +40,7 @@ export default function Home() {
             {!onCanvas && (
               <div className="view view-visible view-scroll">
                 {view === 'library' && <LibraryTab />}
+                {view === 'ocr' && <OcrTab />}
                 {view === 'flashcards' && <FlashcardsTab />}
                 {view === 'exams' && <ExamsTab />}
                 {view === 'pomodoro' && <PomodoroTab />}

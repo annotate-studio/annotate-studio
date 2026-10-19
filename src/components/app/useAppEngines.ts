@@ -25,10 +25,11 @@ const PHASE_LABEL: Record<PomodoroPhase, string> = {
 const VIEW_KEYS: Record<string, ViewMode> = {
   '1': 'canvas',
   '2': 'library',
-  '3': 'flashcards',
-  '4': 'exams',
-  '5': 'pomodoro',
-  '6': 'motivation',
+  '3': 'ocr',
+  '4': 'flashcards',
+  '5': 'exams',
+  '6': 'pomodoro',
+  '7': 'motivation',
   ',': 'settings',
 };
 

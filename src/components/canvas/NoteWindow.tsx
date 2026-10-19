@@ -37,8 +37,9 @@ import { useSettings } from '@/store/settings';
 import { useApp } from '@/store/app';
 import { toast } from '@/store/toast';
 import { cn, extensionOf, stripExtension, baseName } from '@/lib/utils';
+import { resolveWorkspaceImage } from '@/lib/images';
 import { registerWindowKeyHandler } from '@/lib/window-keys';
-import { compileLatex, type CompileIssue } from '@/lib/tauri-commands';
+import { compileLatex, type CompileIssue, type CompileResult } from '@/lib/tauri-commands';
 import { latexToMarkdown, markdownToLatex } from '@/lib/latex-convert';
 import { createNewNote, LATEX_EXTENSIONS, openFileOnCanvas } from '@/lib/workspace-actions';
 import type { DirectionMode } from '@/lib/bidi';
@@ -79,11 +80,12 @@ const INSERT_ITEMS: InsertItem[] = [
   { label: 'Warning box', hint: '> [!warning]', markdown: '> [!warning] ${Title}\n> ${Text}', latex: '\\begin{quote}\n  \\textbf{${Warning}.} ${Text}\n\\end{quote}' },
   { label: 'Formula box', hint: '> [!formula]', markdown: '> [!formula] ${Title}\n> $$${x}$$', latex: '\\begin{equation}\n  \\boxed{${x}}\n\\end{equation}' },
   { label: 'Footnote', hint: '[^1]', markdown: '[^${1}]', latex: '\\footnote{${text}}' },
+  { label: 'Image', hint: '](@file.png)', markdown: '[${1:Description}](@${2:file.png})' },
   { label: 'Table', hint: '| a | b |', markdown: '| ${Column} | ${Column} |\n| --- | --- |\n| ${} | ${} |', latex: '\\begin{tabular}{|l|l|}\n  \\hline\n  ${a} & ${b} \\\\\n  \\hline\n\\end{tabular}' },
   { label: 'Chemical equation', hint: '\\ce{…}', markdown: '$\\ce{${2H2 + O2 -> 2H2O}}$' },
 ];
 
-const INLINE_ITEMS = new Set(['Footnote', 'Chemical equation']);
+const INLINE_ITEMS = new Set(['Footnote', 'Chemical equation', 'Image']);
 
 function NoteWindow({ resourceId, path, title }: { resourceId: string; path: string; title: string }) {
   const buffer = useNotes((state) => state.buffers[path]);
@@ -179,17 +181,7 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
   const onChange = useCallback((value: string) => edit(path, value), [edit, path]);
   const onSave = useCallback(() => void save(path), [save, path]);
 
-  const resolveImage = useCallback(
-    (target: string) => {
-      const name = baseName(target.replace(/\\/g, '/'));
-      const candidates = [target, `notes/${target}`, `documents/${target}`].map((value) => value.replace(/^\.\//, ''));
-      const exact = files.find((file) => candidates.includes(file.path));
-      if (exact) return exact.path;
-      const byName = files.find((file) => file.name === name || stripExtension(file.name) === stripExtension(name));
-      return byName && byName.file_type === 'Image' ? byName.path : null;
-    },
-    [files],
-  );
+  const resolveImage = useCallback((target: string) => resolveWorkspaceImage(target, files), [files]);
 
   const previewSource = useMemo(() => {
     if (!buffer || buffer.status !== 'ready') return '';
@@ -233,8 +225,21 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
   const exportLatex = async () => {
     const source = useNotes.getState().buffers[path]?.content ?? '';
     const stem = stripExtension(baseName(path));
-    const file = await createNewNote({ title: stem, content: markdownToLatex(source, { title: stem }), extension: 'tex', near: resourceId });
+    const file = await createNewNote({ title: stem, content: markdownToLatex(source, { title: stem, resolveImage }), extension: 'tex', near: resourceId });
     if (file) toast.success('Exported to LaTeX', file.name);
+  };
+
+  const openCompiledPdf = (result: CompileResult) => {
+    if (result.success && result.pdf) {
+      useLibrary.getState().upsert(result.pdf);
+      useLibrary.getState().bumpRevision(result.pdf.path);
+      openFileOnCanvas(result.pdf, { near: resourceId });
+      toast.success('PDF ready', `${result.pdf.name} · ${result.engine}`);
+      setIssues(result.issues.length ? result.issues : null);
+    } else {
+      setIssues(result.issues.length ? result.issues : [{ line: null, message: result.log.split('\n').slice(-6).join(' ').trim() || 'Compilation failed.' }]);
+      toast.error('LaTeX compilation failed', `${result.engine}: ${result.issues[0]?.message ?? 'see the error list'}`);
+    }
   };
 
   const compile = async () => {
@@ -243,19 +248,26 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
     setIssues(null);
     try {
       await save(path);
-      const result = await compileLatex(path, texEngine);
-      if (result.success && result.pdf) {
-        useLibrary.getState().upsert(result.pdf);
-        useLibrary.getState().bumpRevision(result.pdf.path);
-        openFileOnCanvas(result.pdf, { near: resourceId });
-        toast.success('PDF ready', `${result.pdf.name} · ${result.engine}`);
-        setIssues(result.issues.length ? result.issues : null);
-      } else {
-        setIssues(result.issues.length ? result.issues : [{ line: null, message: result.log.split('\n').slice(-6).join(' ').trim() || 'Compilation failed.' }]);
-        toast.error('LaTeX compilation failed', `${result.engine}: ${result.issues[0]?.message ?? 'see the error list'}`);
-      }
+      openCompiledPdf(await compileLatex(path, texEngine));
     } catch (error) {
       toast.error('LaTeX compilation failed', error);
+    } finally {
+      setCompiling(false);
+    }
+  };
+
+  const exportPdf = async () => {
+    if (compiling) return;
+    const source = useNotes.getState().buffers[path]?.content ?? '';
+    const stem = stripExtension(baseName(path));
+    setCompiling(true);
+    setIssues(null);
+    try {
+      const tex = await createNewNote({ title: stem, content: markdownToLatex(source, { title: stem, resolveImage }), extension: 'tex', near: resourceId });
+      if (!tex) return;
+      openCompiledPdf(await compileLatex(tex.path, texEngine));
+    } catch (error) {
+      toast.error('PDF export failed', error);
     } finally {
       setCompiling(false);
     }
@@ -401,9 +413,15 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
             <span>PDF</span>
           </button>
         ) : (
-          <button type="button" className="tool-btn" onClick={() => void exportLatex()} title="Export as LaTeX (.tex)">
-            <FileOutput size={14} />
-          </button>
+          <>
+            <button type="button" className="tool-btn note-compile" onClick={() => void exportPdf()} disabled={compiling} title="Export to PDF (via LaTeX)">
+              {compiling ? <Loader2 size={14} className="spin" /> : <FileOutput size={14} />}
+              <span>PDF</span>
+            </button>
+            <button type="button" className="tool-btn" onClick={() => void exportLatex()} title="Export as LaTeX (.tex)">
+              <FileCode2 size={14} />
+            </button>
+          </>
         )}
         <span className="note-meta">{wordCount(buffer.content)} words</span>
         <span className={cn('save-state', buffer.error ? 'save-state-error' : buffer.dirty || buffer.saving ? 'save-state-pending' : 'save-state-saved')}>

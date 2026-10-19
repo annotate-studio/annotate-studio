@@ -217,32 +217,6 @@ export default function CanvasViewport() {
   }, []);
 
   useEffect(() => {
-    const onPaste = (event: ClipboardEvent) => {
-      if (useApp.getState().currentView !== 'canvas' || isEditableTarget(event.target)) return;
-      const target = event.target instanceof Element ? event.target : null;
-      if (target?.closest('[data-window-id], .dialog-overlay, .popover')) return;
-      const images = Array.from(event.clipboardData?.files ?? []).filter((file) => file.type.startsWith('image/'));
-      const stamp = new Date().toISOString().slice(0, 19).replace('T', ' ').replace(/:/g, '-');
-      if (images.length > 0) {
-        event.preventDefault();
-        const renamed = images.map(
-          (file, index) => new File([file], `Pasted image ${stamp}${index ? ` ${index + 1}` : ''}.${file.type.split('/')[1] || 'png'}`, { type: file.type }),
-        );
-        void importBrowserFiles(renamed);
-        return;
-      }
-      const text = event.clipboardData?.getData('text/plain') ?? '';
-      if (text.trim()) {
-        event.preventDefault();
-        const firstLine = text.trim().split('\n')[0].replace(/^#+\s*/, '').trim();
-        void createNewNote({ title: firstLine.slice(0, 48) || 'Pasted note', content: text });
-      }
-    };
-    window.addEventListener('paste', onPaste);
-    return () => window.removeEventListener('paste', onPaste);
-  }, []);
-
-  useEffect(() => {
     if (!isTauri()) return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
@@ -370,7 +344,7 @@ export default function CanvasViewport() {
             </button>
           </div>
           <ul className="canvas-hints">
-            <li>Drop files anywhere or paste an image</li>
+            <li>Drop files anywhere to import them</li>
             <li>Double-click the canvas for a quick note</li>
             <li>
               Drag the background or hold <kbd>Space</kbd> to pan · <kbd>Ctrl</kbd> + scroll to zoom

@@ -1,6 +1,8 @@
 import { detectDirection, hasPersianLetters, toPersianDigits } from './bidi';
+import { workspaceImageTarget } from './images';
 import { ENV_LABELS, findDefinitions, readGroup } from './latex';
 import { inlineProse, MATH_ENVIRONMENTS, parseMarkdown, THEOREM_ENVIRONMENTS, type Align, type Block, type Inline } from './markdown';
+import { baseName } from './utils';
 
 export interface LatexToMarkdownOptions {
   resolveImage?: (path: string) => string | null;
@@ -709,6 +711,7 @@ export function latexToMarkdown(source: string, options: LatexToMarkdownOptions 
 export interface MarkdownToLatexOptions {
   title?: string;
   author?: string;
+  resolveImage?: (target: string) => string | null;
 }
 
 interface ExportState {
@@ -718,6 +721,7 @@ interface ExportState {
   packages: Set<string>;
   theorems: Set<string>;
   definitions: string[];
+  resolveImage?: (target: string) => string | null;
 }
 
 const LATEX_SPECIALS: Record<string, string> = {
@@ -771,9 +775,15 @@ function inlineToLatex(nodes: Inline[], state: ExportState): string {
         case 'link':
           state.packages.add('hyperref');
           return `\\href{${node.href.replace(/[%#]/g, (char) => `\\${char}`)}}{${inlineToLatex(node.children, state)}}`;
-        case 'image':
+        case 'image': {
           state.packages.add('graphicx');
-          return `\\includegraphics[width=0.8\\linewidth]{${node.src}}`;
+          const target = workspaceImageTarget(node.src);
+          const resolved = state.resolveImage ? state.resolveImage(target) : null;
+          // The TeX engine searches the workspace `notes/` and `documents/`
+          // folders through TEXINPUTS, so the bare file name resolves fine.
+          const file = baseName((resolved ?? target).replace(/\\/g, '/'));
+          return `\\includegraphics[width=0.8\\linewidth]{${file}}`;
+        }
         case 'wikilink':
           return textToLatex(node.label, state);
         case 'footnoteRef': {
@@ -878,6 +888,7 @@ export function markdownToLatex(markdown: string, options: MarkdownToLatexOption
     packages: new Set(['amsmath', 'amssymb', 'amsthm', 'graphicx', 'hyperref']),
     theorems: new Set(),
     definitions: [],
+    resolveImage: options.resolveImage,
   };
   let title = options.title ?? '';
   let content = blocks;

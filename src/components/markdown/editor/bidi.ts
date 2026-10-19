@@ -25,7 +25,24 @@ const documentDirection = StateField.define<TextDirection>({
 
 const LTR_BLOCKS = new Set(['FencedCode', 'CodeBlock', 'BlockMath', 'HTMLBlock', 'CommentBlock']);
 const LTR_ISOLATE = Decoration.mark({ bidiIsolate: Direction.LTR, attributes: { dir: 'ltr' } });
-const ISOLATED_INLINE = new Set(['InlineCode', 'InlineMath', 'URL', 'HTMLTag', 'Autolink', 'Entity']);
+const ISOLATED_INLINE = new Set(['InlineCode', 'InlineMath', 'URL', 'HTMLTag', 'Autolink', 'Entity', 'HeaderMark', 'QuoteMark', 'ListMark']);
+
+const BLOCK_MARKS = /^\s*(?:#{1,6}\s*|>\s?|[-*+]\s|\d+[.)]\s)/;
+
+/**
+ * Direction of a line is decided by its content, not by the markdown marks in
+ * front of it: `# سرفصل` is Persian text with an LTR hashtag, so the mark is
+ * isolated and the sentence aligns to the right.
+ */
+function stripBlockMarks(text: string): string {
+  let out = text;
+  for (let pass = 0; pass < 3; pass += 1) {
+    const match = BLOCK_MARKS.exec(out);
+    if (!match) break;
+    out = out.slice(match[0].length);
+  }
+  return out;
+}
 
 const lineRtl = Decoration.line({ attributes: { dir: 'rtl' } });
 const lineLtr = Decoration.line({ attributes: { dir: 'ltr' } });
@@ -55,9 +72,6 @@ function build(view: EditorView): BidiDecorations {
           if (node.to > node.from) isolates.push({ from: node.from, to: node.to, deco: LTR_ISOLATE });
           return false;
         }
-        if (node.name === 'ListMark' && /\d/.test(view.state.sliceDoc(node.from, node.to))) {
-          isolates.push({ from: node.from, to: node.to, deco: LTR_ISOLATE });
-        }
         return undefined;
       },
     });
@@ -73,7 +87,7 @@ function build(view: EditorView): BidiDecorations {
       if (inLtrBlock) direction = 'ltr';
       else if (mode !== 'auto') direction = mode;
       else if (line.text.trim()) {
-        direction = latexDocument && countLetters(line.text).rtl === 0 ? 'ltr' : resolveDirection(line.text, previous ?? fallback);
+        direction = latexDocument && countLetters(line.text).rtl === 0 ? 'ltr' : resolveDirection(stripBlockMarks(line.text), previous ?? fallback);
         previous = direction;
       } else {
         direction = previous ?? fallback;

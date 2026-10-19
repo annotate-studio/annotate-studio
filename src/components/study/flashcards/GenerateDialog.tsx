@@ -66,7 +66,8 @@ export default function GenerateDialog({ open, defaultCollectionId, onClose }: G
     };
   }, [open]);
 
-  const canGenerate = source === 'text' ? text.trim().length > 0 || instructions.trim().length > 0 : Boolean(path);
+  const canGenerate =
+    (source === 'text' ? text.trim().length > 0 || instructions.trim().length > 0 : Boolean(path)) && Boolean(collectionId);
 
   const stop = () => {
     stoppedRef.current = true;
@@ -203,13 +204,20 @@ export default function GenerateDialog({ open, defaultCollectionId, onClose }: G
         <label className="field">
           <span className="field-label">Save to collection</span>
           <select className="select" value={collectionId} onChange={(event) => setCollectionId(event.target.value)} disabled={busy}>
-            <option value="">Unsorted</option>
+            <option value="" disabled>
+              Choose a collection…
+            </option>
             {collections.map((collection) => (
               <option key={collection.id} value={collection.id}>
                 {collection.name}
               </option>
             ))}
           </select>
+          {collections.length === 0 ? (
+            <span className="field-hint">Generated cards always belong to a collection. Close this dialog and create one first with the + button.</span>
+          ) : (
+            <span className="field-hint">Generated cards are saved into this collection instead of piling up in “All cards”.</span>
+          )}
         </label>
         {busy && (
           <div className="progress-panel">

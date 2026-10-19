@@ -32,6 +32,7 @@ import { normalizeForSearch } from '@/lib/bidi';
 import { stripExtension } from '@/lib/utils';
 import { HighlightExtension, highlightTag, MathExtension, mathMarkTag, mathTag } from './editor/math-syntax';
 import { bidiSupport, insertZeroWidthNonJoiner, setDirectionMode } from './editor/bidi';
+import { searchPanel } from './editor/search-panel';
 import { globalMacros, latexAssist, latexCompletions, type DocumentKind } from './editor/latex-assist';
 import { latexLanguage } from './editor/latex-language';
 
@@ -127,6 +128,23 @@ function wikiCompletions(getFiles: () => StudyFile[]) {
         };
       });
     return { from: match.from + 2, options, filter: false };
+  };
+}
+
+function imageCompletions(getFiles: () => StudyFile[]) {
+  return (context: CompletionContext) => {
+    const match = context.matchBefore(/\]\(@[^)\n]*$/);
+    if (!match) return null;
+    const query = normalizeForSearch(match.text.slice(3));
+    const options: Completion[] = getFiles()
+      .filter((file) => file.file_type === 'Image' && normalizeForSearch(file.name).includes(query))
+      .slice(0, 60)
+      .map((file) => ({
+        label: file.name,
+        detail: 'image',
+        apply: `${file.name})`,
+      }));
+    return { from: match.from + 3, options, filter: false };
   };
 }
 
@@ -238,7 +256,10 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   useEffect(() => {
     if (!hostRef.current) return;
     const start = initial.current;
-    const completionSources = language === 'markdown' ? [wikiCompletions(() => getFilesRef.current?.() ?? []), latexCompletions] : [latexCompletions];
+    const completionSources =
+      language === 'markdown'
+        ? [wikiCompletions(() => getFilesRef.current?.() ?? []), imageCompletions(() => getFilesRef.current?.() ?? []), latexCompletions]
+        : [latexCompletions];
     const extensions: Extension[] = [
       highlightSpecialChars(),
       history(),
@@ -249,6 +270,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       closeBrackets(),
       highlightActiveLine(),
       highlightSelectionMatches(),
+      searchPanel(),
       EditorView.lineWrapping,
       bidiSupport(start.direction),
       languageExtension(language),

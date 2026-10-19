@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type ViewMode = 'canvas' | 'library' | 'flashcards' | 'exams' | 'pomodoro' | 'motivation' | 'settings';
+export type ViewMode = 'canvas' | 'library' | 'ocr' | 'flashcards' | 'exams' | 'pomodoro' | 'motivation' | 'settings';
 
 export type ChatRequest =
   | { kind: 'draft'; text: string }

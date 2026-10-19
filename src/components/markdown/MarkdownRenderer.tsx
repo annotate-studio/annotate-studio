@@ -36,9 +36,11 @@ import {
   type TextDirection,
 } from '@/lib/bidi';
 import { openExternal } from '@/lib/external';
+import { isWorkspaceImageReference, resolveWorkspaceImage, workspaceImageTarget } from '@/lib/images';
 import { readFileBytes } from '@/lib/tauri-commands';
 import { copyText, cn, extensionOf } from '@/lib/utils';
 import { openWikiLink } from '@/lib/workspace-actions';
+import { useLibrary } from '@/store/library';
 import { useFormula } from '@/store/formula';
 import { useSettings } from '@/store/settings';
 
@@ -158,17 +160,29 @@ function hostOf(url: string): string {
 }
 
 function WorkspaceImage({ src, alt }: { src: string; alt: string }) {
+  const files = useLibrary((state) => state.files);
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const target = useMemo(() => {
+    const cleaned = workspaceImageTarget(src);
+    if (!cleaned) return null;
+    const forced = isWorkspaceImageReference(src);
+    if (!forced && (cleaned.includes('/') || files.length === 0)) return cleaned;
+    return resolveWorkspaceImage(cleaned, files) ?? (forced ? null : cleaned);
+  }, [src, files]);
   useEffect(() => {
     let revoked = false;
     let objectUrl: string | null = null;
     setUrl(null);
     setFailed(false);
-    readFileBytes(src)
+    if (!target) {
+      setFailed(true);
+      return;
+    }
+    readFileBytes(target)
       .then((bytes) => {
         if (revoked) return;
-        objectUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type: MIME[extensionOf(src)] ?? 'application/octet-stream' }));
+        objectUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type: MIME[extensionOf(target)] ?? 'application/octet-stream' }));
         setUrl(objectUrl);
       })
       .catch(() => {
@@ -178,8 +192,8 @@ function WorkspaceImage({ src, alt }: { src: string; alt: string }) {
       revoked = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [src]);
-  if (failed) return <span className="md-image-missing">{alt || src}</span>;
+  }, [target]);
+  if (failed) return <span className="md-image-missing">{alt || workspaceImageTarget(src)}</span>;
   if (!url) return <span className="md-image-loading" />;
   return <img className="md-image" src={url} alt={alt} />;
 }
@@ -350,18 +364,22 @@ function renderInline(nodes: Inline[], context: RenderContext): React.ReactNode[
   });
 }
 
-function inlineDirection(nodes: Inline[]): TextDirection | null {
-  return detectDirection(inlineProse(nodes));
+function inlineDirection(nodes: Inline[], persian = false): TextDirection | null {
+  const prose = inlineProse(nodes);
+  const detected = detectDirection(prose);
+  if (detected === 'rtl') return 'rtl';
+  if (persian && hasPersianLetters(prose)) return 'rtl';
+  return detected;
 }
 
-function inherentDirection(block: Block): TextDirection | null {
+function inherentDirection(block: Block, persian = false): TextDirection | null {
   switch (block.type) {
     case 'heading':
     case 'paragraph':
-      return inlineDirection(block.children);
+      return inlineDirection(block.children, persian);
     case 'list': {
       for (const item of block.items) {
-        const direction = blocksDirection(item.children);
+        const direction = blocksDirection(item.children, persian);
         if (direction) return direction;
       }
       return null;
@@ -369,9 +387,9 @@ function inherentDirection(block: Block): TextDirection | null {
     case 'quote':
     case 'footnoteDef':
     case 'env':
-      return blocksDirection(block.children) ?? (block.type === 'env' && block.title ? inlineDirection(block.title) : null);
+      return blocksDirection(block.children, persian) ?? (block.type === 'env' && block.title ? inlineDirection(block.title, persian) : null);
     case 'callout':
-      return blocksDirection(block.children) ?? inlineDirection(block.title);
+      return blocksDirection(block.children, persian) ?? inlineDirection(block.title, persian);
     case 'table': {
       let rtl = 0;
       let ltr = 0;
@@ -381,16 +399,18 @@ function inherentDirection(block: Block): TextDirection | null {
         rtl += counts.rtl;
         ltr += counts.ltr;
       }
-      return directionFromCounts({ rtl, ltr });
+      const detected = directionFromCounts({ rtl, ltr });
+      if (detected === 'ltr' && persian && rtl > 0) return 'rtl';
+      return detected;
     }
     default:
       return null;
   }
 }
 
-function blocksDirection(blocks: Block[]): TextDirection | null {
+function blocksDirection(blocks: Block[], persian = false): TextDirection | null {
   for (const block of blocks) {
-    const direction = inherentDirection(block);
+    const direction = inherentDirection(block, persian);
     if (direction) return direction;
   }
   return null;
@@ -490,7 +510,7 @@ function EnvBlock({ block, dir }: { block: Extract<Block, { type: 'env' }>; dir:
 
 function renderBlocks(blocks: Block[], context: RenderContext, parentDir: TextDirection, tight = false): React.ReactNode[] {
   return blocks.map((block, index) => {
-    const dir = inherentDirection(block) ?? parentDir;
+    const dir = inherentDirection(block, context.persian) ?? parentDir;
     switch (block.type) {
       case 'heading': {
         const Tag = `h${block.level}` as 'h1';
@@ -534,7 +554,7 @@ function renderBlocks(blocks: Block[], context: RenderContext, parentDir: TextDi
         return null;
       case 'list': {
         const items = block.items.map((item, itemIndex) => {
-          const itemDir = blocksDirection(item.children) ?? dir;
+          const itemDir = blocksDirection(item.children, context.persian) ?? dir;
           return (
             <li key={itemIndex} dir={itemDir} className={item.checked !== null ? 'md-task' : undefined}>
               {item.checked !== null ? (
@@ -572,7 +592,7 @@ function renderBlocks(blocks: Block[], context: RenderContext, parentDir: TextDi
               <thead>
                 <tr>
                   {block.header.map((cell, cellIndex) => (
-                    <th key={cellIndex} dir={inlineDirection(cell) ?? dir} style={{ textAlign: block.align[cellIndex] ?? undefined }}>
+                    <th key={cellIndex} dir={inlineDirection(cell, context.persian) ?? dir} style={{ textAlign: block.align[cellIndex] ?? undefined }}>
                       {renderInline(cell, context)}
                     </th>
                   ))}
@@ -582,7 +602,7 @@ function renderBlocks(blocks: Block[], context: RenderContext, parentDir: TextDi
                 {block.rows.map((row, rowIndex) => (
                   <tr key={rowIndex}>
                     {row.map((cell, cellIndex) => (
-                      <td key={cellIndex} dir={inlineDirection(cell) ?? dir} style={{ textAlign: block.align[cellIndex] ?? undefined }}>
+                      <td key={cellIndex} dir={inlineDirection(cell, context.persian) ?? dir} style={{ textAlign: block.align[cellIndex] ?? undefined }}>
                         {renderInline(cell, context)}
                       </td>
                     ))}
@@ -608,7 +628,7 @@ function Footnotes({ dir }: { dir: TextDirection }) {
       <ol className={dir === 'rtl' && context.persian ? 'md-ol-persian' : undefined}>
         {entries.map((id) => {
           const children = defs.get(id) ?? [];
-          const itemDir = blocksDirection(children) ?? dir;
+          const itemDir = blocksDirection(children, context.persian) ?? dir;
           return (
             <li key={id} data-footnote={id} dir={itemDir}>
               {renderBlocks(children, context, itemDir, true)}

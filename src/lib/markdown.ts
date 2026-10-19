@@ -1,3 +1,5 @@
+import { isWorkspaceImageReference } from './images';
+
 export type Inline =
   | { type: 'text'; value: string }
   | { type: 'strong'; children: Inline[] }
@@ -737,7 +739,11 @@ export function parseInline(src: string): Inline[] {
         const destination = end > 0 ? parseDestination(src, end + 1) : null;
         if (destination) {
           flush();
-          out.push({ type: 'link', href: destination.href, children: parseInline(src.slice(i + 1, end)) });
+          if (isWorkspaceImageReference(destination.href)) {
+            out.push({ type: 'image', alt: src.slice(i + 1, end), src: destination.href });
+          } else {
+            out.push({ type: 'link', href: destination.href, children: parseInline(src.slice(i + 1, end)) });
+          }
           i = destination.end;
           continue;
         }

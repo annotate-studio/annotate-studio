@@ -6317,3 +6317,194 @@ input[type='checkbox'] {
   flex-shrink: 0;
   opacity: 0.7;
 }
+
+/* ------------------------------------------------------------------ */
+/* Editor search panel (Ctrl+F)                                        */
+/* ------------------------------------------------------------------ */
+
+.cm-panels .md-search-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+.md-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.md-search-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.md-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.md-search-input:focus {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+.md-search-count {
+  min-width: 56px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.md-search-count-empty {
+  color: #d97706;
+}
+
+.md-search-toggle {
+  height: 24px;
+  min-width: 24px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.md-search-toggle:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.md-search-toggle.active {
+  background: var(--primary-soft);
+  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+  color: var(--primary);
+}
+
+.md-search-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.md-search-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.md-search-close {
+  margin-left: 2px;
+}
+
+.md-search-close:hover {
+  background: color-mix(in srgb, #ef4444 15%, transparent);
+  color: #ef4444;
+}
+
+.md-search-action {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.md-search-action:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.md-search-all {
+  border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+}
+
+/* ------------------------------------------------------------------ */
+/* OCR page                                                            */
+/* ------------------------------------------------------------------ */
+
+.ocr-page {
+  display: flex;
+  flex-direction: column;
+}
+
+.ocr-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 420px;
+  height: calc(100vh - 230px);
+  max-height: 920px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-card);
+}
+
+.side-panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.icon-btn-primary {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.icon-btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 20%, transparent);
+}
+
+/* ------------------------------------------------------------------ */
+/* Right-to-left markdown polish                                       */
+/* ------------------------------------------------------------------ */
+
+.md-image {
+  margin-inline: auto;
+}
+
+.md[dir='rtl'] .md-image-missing,
+.md[dir='rtl'] .md-image-loading {
+  text-align: right;
+}

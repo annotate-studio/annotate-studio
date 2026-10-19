@@ -80,3 +80,12 @@ test('exports Persian notes with xepersian and wraps Latin words', () => {
   assert.ok(latex.includes('\\lr{Rust}'));
   assert.ok(latex.includes('\\renewcommand{\\proofname}{اثبات}'));
 });
+
+test('resolves @-image references when exporting to LaTeX', () => {
+  const resolved = markdownToLatex('[A figure](@diagram.png)', {
+    resolveImage: (target) => (target === 'diagram.png' ? 'documents/diagram.png' : null),
+  });
+  assert.ok(resolved.includes('\\includegraphics[width=0.8\\linewidth]{diagram.png}'));
+  const plain = markdownToLatex('![caption](@scan.jpg)');
+  assert.ok(plain.includes('\\includegraphics[width=0.8\\linewidth]{scan.jpg}'));
+});

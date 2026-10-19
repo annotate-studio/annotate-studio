@@ -181,3 +181,15 @@ test('keeps pipes inside math in table cells', () => {
   assert.equal(table.rows[0].length, 2);
   assert.equal(table.rows[0][0][0].type, 'math');
 });
+
+test('parses @-file references as workspace images', () => {
+  const link = parseInline('[figure one](@diagram.png)');
+  assert.equal(link.length, 1);
+  assert.deepEqual(link[0], { type: 'image', alt: 'figure one', src: '@diagram.png' });
+
+  const bang = parseInline('![caption](@docs/scan.jpg)');
+  assert.deepEqual(bang[0], { type: 'image', alt: 'caption', src: '@docs/scan.jpg' });
+
+  const regular = parseInline('[site](https://example.com)');
+  assert.equal(regular[0].type, 'link');
+});

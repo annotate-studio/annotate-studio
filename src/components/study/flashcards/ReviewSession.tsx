@@ -1,20 +1,12 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, PartyPopper, RotateCcw } from 'lucide-react';
-import MarkdownRenderer from '@/components/markdown/MarkdownRenderer';
+import { ArrowLeft, PartyPopper } from 'lucide-react';
 import { reviewFlashcard, type Flashcard, type ReviewQuality } from '@/lib/tauri-commands';
 import { isDue, useFlashcards } from '@/store/flashcards';
 import { toast } from '@/store/toast';
-import { cn, isEditableTarget } from '@/lib/utils';
-import { formatInterval, nextIntervalDays } from './schedule';
-
-const RATINGS: { quality: ReviewQuality; label: string; key: string; tone: string }[] = [
-  { quality: 'Again', label: 'Again', key: '1', tone: 'rate-again' },
-  { quality: 'Hard', label: 'Hard', key: '2', tone: 'rate-hard' },
-  { quality: 'Good', label: 'Good', key: '3', tone: 'rate-good' },
-  { quality: 'Easy', label: 'Easy', key: '4', tone: 'rate-easy' },
-];
+import { isEditableTarget } from '@/lib/utils';
+import ReviewCard, { RATINGS } from './ReviewCard';
 
 interface ReviewSessionProps {
   cardIds: string[];
@@ -114,51 +106,7 @@ export default function ReviewSession({ cardIds, title, practice = false, onExit
           </span>
         </div>
       </div>
-      <div
-        className={cn('flip-card', flipped && 'flipped')}
-        role="button"
-        tabIndex={0}
-        onClick={() => setFlipped((v) => !v)}
-        aria-label={flipped ? 'Show question' : 'Show answer'}
-      >
-        <div className="flip-card-inner">
-          <div className="flip-card-face flip-card-front">
-            <span className="flip-card-label">Question</span>
-            <div className="flip-card-content content-selectable">
-              <MarkdownRenderer content={current.front} />
-            </div>
-            <span className="flip-card-hint">Click or press Space to reveal</span>
-          </div>
-          <div className="flip-card-face flip-card-back">
-            <span className="flip-card-label">Answer</span>
-            <div className="flip-card-content content-selectable">
-              <MarkdownRenderer content={current.back} />
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className={cn('rating-row', !flipped && 'rating-row-hidden')}>
-        {RATINGS.map((rating) => (
-          <button
-            key={rating.quality}
-            type="button"
-            className={cn('rating-btn', rating.tone)}
-            onClick={() => void rate(rating.quality)}
-            disabled={!flipped || saving}
-          >
-            <span>{rating.label}</span>
-            <small>
-              {scheduled ? formatInterval(nextIntervalDays(current, rating.quality)) : 'practice'} · {rating.key}
-            </small>
-          </button>
-        ))}
-      </div>
-      {!scheduled && <div className="review-meta">Practice only: this card is not due, so its schedule stays the same.</div>}
-      {current.last_quality && (
-        <div className="review-meta">
-          <RotateCcw size={12} /> Last time: {current.last_quality}
-        </div>
-      )}
+      <ReviewCard card={current} flipped={flipped} saving={saving} scheduled={scheduled} onFlip={() => setFlipped((v) => !v)} onRate={(quality) => void rate(quality)} />
     </div>
   );
 }

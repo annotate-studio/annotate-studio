@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import {
+  deleteFlashcard,
   deleteFlashcardsByCollection,
   getFlashcards,
   loadCollections,
@@ -35,6 +36,7 @@ interface FlashcardStore {
   setReviewPeriod: (id: string, days: number) => void;
   deleteCollection: (id: string) => Promise<void>;
   clearCollection: (id: string) => Promise<void>;
+  clearCards: (ids: string[]) => Promise<void>;
   addCards: (cards: Flashcard[]) => void;
   upsertCard: (card: Flashcard) => void;
   removeCard: (id: string) => void;
@@ -148,6 +150,13 @@ export const useFlashcards = create<FlashcardStore>((set, get) => ({
   clearCollection: async (id) => {
     await deleteFlashcardsByCollection(id);
     set((state) => ({ cards: state.cards.filter((card) => card.collectionId !== id) }));
+  },
+  clearCards: async (ids) => {
+    for (const id of ids) await deleteFlashcard(id);
+    set((state) => {
+      const gone = new Set(ids);
+      return { cards: state.cards.filter((card) => !gone.has(card.id)) };
+    });
   },
   addCards: (cards) =>
     set((state) => {

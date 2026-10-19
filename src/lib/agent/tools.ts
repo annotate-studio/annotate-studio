@@ -10,6 +10,7 @@ import {
 } from '@/lib/tauri-commands';
 import { resolveAnswer, stripLetterPrefixes } from '@/lib/answers';
 import { markdownToLatex } from '@/lib/latex-convert';
+import { resolveWorkspaceImage } from '@/lib/images';
 import { baseName, extensionOf, stripExtension, uid } from '@/lib/utils';
 import { createNewNote, LATEX_EXTENSIONS, openFileOnCanvas, renameFile } from '@/lib/workspace-actions';
 import { normalizeForSearch } from '@/lib/bidi';
@@ -661,6 +662,7 @@ const exportNote: AgentTool = {
   },
   label: (args) => `Exported ${baseName(str(args.path))} to ${str(args.format)}`,
   run: async (args, context) => {
+    const resolveImage = (target: string) => resolveWorkspaceImage(target, useLibrary.getState().files);
     const file = await requireFile(args.path);
     await guardWrite(context, '', '', false);
     const latexFile = LATEX_EXTENSIONS.includes(extensionOf(file.name));
@@ -668,7 +670,7 @@ const exportNote: AgentTool = {
       let source = file;
       if (!latexFile) {
         const content = await readText(file.path);
-        const created = await createNewNote({ title: stripExtension(file.name), content: markdownToLatex(content, { title: stripExtension(file.name) }), extension: 'tex', near: context.near });
+        const created = await createNewNote({ title: stripExtension(file.name), content: markdownToLatex(content, { title: stripExtension(file.name), resolveImage }), extension: 'tex', near: context.near });
         if (!created) throw new Error('Could not create the LaTeX file.');
         source = created;
       }
@@ -682,7 +684,7 @@ const exportNote: AgentTool = {
     }
     if (latexFile) throw new Error(`${file.name} is already a LaTeX file.`);
     const content = await readText(file.path);
-    const created = await createNewNote({ title: stripExtension(file.name), content: markdownToLatex(content, { title: stripExtension(file.name) }), extension: 'tex', near: context.near });
+    const created = await createNewNote({ title: stripExtension(file.name), content: markdownToLatex(content, { title: stripExtension(file.name), resolveImage }), extension: 'tex', near: context.near });
     if (!created) throw new Error('Could not create the LaTeX file.');
     context.createdPaths.add(created.path);
     return { text: `Exported ${file.path} to ${created.path}.`, summary: created.name, paths: [created.path] };

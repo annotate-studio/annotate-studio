@@ -98,7 +98,7 @@ const MODEL_HINTS: Record<string, string> = {
 };
 
 const SHORTCUTS: { keys: string; action: string }[] = [
-  { keys: 'Ctrl + 1…6 / Ctrl + ,', action: 'Go to canvas, library, flashcards, exams, pomodoro, motivation / settings' },
+  { keys: 'Ctrl + 1…7 / Ctrl + ,', action: 'Go to canvas, library, OCR, flashcards, exams, pomodoro, motivation / settings' },
   { keys: 'Ctrl + J', action: 'Show or hide the assistant' },
   { keys: 'Drag background / Space + drag / middle mouse', action: 'Pan the canvas' },
   { keys: 'Ctrl + scroll, pinch', action: 'Zoom the canvas around the pointer' },

@@ -11,6 +11,7 @@ import {
   NotebookPen,
   Pencil,
   ScanSearch,
+  Trash2,
   X,
 } from 'lucide-react';
 import {
@@ -21,8 +22,8 @@ import {
   type Resource,
 } from '@/store/canvas';
 import { openContextMenu, type MenuEntry } from '@/components/ui/ContextMenu';
-import { promptDialog } from '@/store/dialogs';
-import { renameFile } from '@/lib/workspace-actions';
+import { confirmDialog, promptDialog } from '@/store/dialogs';
+import { deleteFile, renameFile } from '@/lib/workspace-actions';
 import { baseName, copyText, cn, stripExtension } from '@/lib/utils';
 import { setContentWindow } from '@/lib/window-keys';
 import { toast } from '@/store/toast';
@@ -183,6 +184,17 @@ function CanvasWindow({ resource }: { resource: Resource }) {
     }
   };
 
+  const remove = async () => {
+    if (!resource.filePath) return;
+    const ok = await confirmDialog({
+      title: `Delete “${baseName(resource.filePath)}”?`,
+      message: 'The file is removed from your workspace and closed on every canvas. This cannot be undone.',
+      confirmLabel: 'Delete file',
+      danger: true,
+    });
+    if (ok) await deleteFile(resource.filePath);
+  };
+
   const showMenu = (event: React.MouseEvent) => {
     const canvas = useCanvas.getState();
     const items: MenuEntry[] = [
@@ -202,7 +214,10 @@ function CanvasWindow({ resource }: { resource: Resource }) {
         onSelect: () => void copyText(resource.filePath ?? '').then((ok) => ok && toast.success('Path copied')),
       });
     }
-    items.push('separator', { label: 'Close', icon: <X size={13} />, danger: true, onSelect: () => canvas.closeResource(resource.id) });
+    items.push('separator', { label: 'Close', icon: <X size={13} />, onSelect: () => canvas.closeResource(resource.id) });
+    if (resource.filePath) {
+      items.push({ label: 'Delete file…', icon: <Trash2 size={13} />, danger: true, onSelect: () => void remove() });
+    }
     openContextMenu(event, items);
   };
 
@@ -240,6 +255,7 @@ function CanvasWindow({ resource }: { resource: Resource }) {
       data-window-type={resource.type}
       data-active={selected ? 'true' : undefined}
       onPointerDownCapture={activate}
+      onContextMenu={showMenu}
     >
       <header
         className="cw-titlebar"

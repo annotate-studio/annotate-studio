@@ -224,6 +224,41 @@ export default function FlashcardsTab() {
     openContextMenu(event, items);
   };
 
+  const pseudoMenu = (kind: 'all' | 'unsorted') => (event: React.MouseEvent) => {
+    const targets = kind === 'all' ? cards : cards.filter((card) => !card.collectionId);
+    const name = kind === 'all' ? 'All cards' : 'Unsorted';
+    const items: MenuEntry[] = [
+      {
+        label: kind === 'all' ? 'Clear all cards…' : 'Clear unsorted…',
+        icon: <Eraser size={13} />,
+        danger: true,
+        onSelect: async () => {
+          if (targets.length === 0) {
+            toast.info(`${name} is empty`, 'There is nothing to clear.');
+            return;
+          }
+          const ok = await confirmDialog({
+            title: kind === 'all' ? 'Clear all flashcards?' : 'Clear unsorted cards?',
+            message:
+              kind === 'all'
+                ? `Deletes all ${targets.length} flashcard${targets.length === 1 ? '' : 's'} from every collection. This cannot be undone.`
+                : `Deletes all ${targets.length} unsorted card${targets.length === 1 ? '' : 's'}. Collections are not affected.`,
+            confirmLabel: 'Clear',
+            danger: true,
+          });
+          if (!ok) return;
+          try {
+            await useFlashcards.getState().clearCards(targets.map((card) => card.id));
+            toast.success(kind === 'all' ? 'All cards cleared' : 'Unsorted cards cleared');
+          } catch (error) {
+            toast.error('Clear failed', error);
+          }
+        },
+      },
+    ];
+    openContextMenu(event, items);
+  };
+
   const removeCard = async (card: Flashcard) => {
     const ok = await confirmDialog({ title: 'Delete this card?', message: card.front.slice(0, 160), confirmLabel: 'Delete', danger: true });
     if (!ok) return;
@@ -262,6 +297,7 @@ export default function FlashcardsTab() {
             due={cards.filter((card) => isDue(card, now)).length}
             active={activeId === null}
             onClick={() => setActive(null)}
+            onMenu={pseudoMenu('all')}
           />
           {unsortedCount > 0 && (
             <CollectionItem
@@ -271,6 +307,7 @@ export default function FlashcardsTab() {
               due={cards.filter((card) => !card.collectionId && isDue(card, now)).length}
               active={activeId === UNSORTED_ID}
               onClick={() => setActive(UNSORTED_ID)}
+              onMenu={pseudoMenu('unsorted')}
             />
           )}
           {collections.map((collection) => {
