@@ -8,7 +8,12 @@ export type PromptId =
   | 'mindmap'
   | 'why-how'
   | 'cheat-sheet'
-  | 'contradictions';
+  | 'contradictions'
+  | 'feynman'
+  | 'analogy'
+  | 'exam-traps'
+  | 'practice'
+  | 'synthesize';
 
 export interface PromptPreset {
   id: PromptId;
@@ -25,7 +30,7 @@ Every response must include a "visualization_type" field that matches the reques
 Use plain readable text inside string values; do not use Markdown or LaTeX markup inside the JSON.
 Study material is provided inside <document name="..."> blocks. Ground the answer in that material, never invent facts, quotes or numbers that it does not contain.
 When no study material is provided, use your general knowledge and keep the answer focused on the requested task.
-Reply in the language of the provided material.`;
+Answer in user prompt's language.`;
 
 export const PROMPT_PRESETS: PromptPreset[] = [
   {
@@ -99,6 +104,51 @@ export const PROMPT_PRESETS: PromptPreset[] = [
     temperature: 0.35,
     instruction:
       'Critically audit the material for logical inconsistencies, hidden assumptions, unsupported leaps, or contradictions. Identify up to 5 concrete weaknesses with the exact claim, fallacy/flaw category, and a clear explanation. If the reasoning is fully sound, return an empty array. Respond with {"visualization_type":"fallacy_list","fallacies":[{"claim":"The claim made in the text.","fallacy_type":"Hidden Assumption","explanation":"Why this is flawed."}]}.',
+  },
+  {
+    id: 'feynman',
+    label: 'Feynman check',
+    description: 'Audit your explanation for clarity, missing steps, and misconceptions.',
+    visualization: 'cheat_sheet',
+    temperature: 0.3,
+    instruction:
+      'Evaluate the student explanation using the Feynman Technique. Respond with {"visualization_type":"cheat_sheet","title":"Feynman Review","core":"One-sentence clarity verdict and what the student understood well.","facts":["Missing step or gap 1.","Misconception to fix 1."],"terms":[{"term":"Shaky concept","definition":"Simple plain-language explanation."}],"example":"A crystal-clear 2-3 sentence model explanation in simple terms."}.',
+  },
+  {
+    id: 'analogy',
+    label: 'Analogy & intuition',
+    description: 'Everyday analogy, mental picture, and where the analogy breaks down.',
+    visualization: 'cheat_sheet',
+    temperature: 0.5,
+    instruction:
+      'Build deep intuition for the core concept in the material. Respond with {"visualization_type":"cheat_sheet","title":"Intuition & Analogy","core":"A vivid everyday real-world analogy for the concept.","facts":["How the analogy maps onto the real mechanism.","Visual or geometric mental picture."],"terms":[{"term":"Analogy element","definition":"What it corresponds to in the real concept."}],"example":"Where this analogy breaks down (crucial boundary so the student avoids misconceptions)."}.',
+  },
+  {
+    id: 'exam-traps',
+    label: 'Exam traps & mistakes',
+    description: 'Edge cases, trick variations, and common pitfalls that cost exam points.',
+    visualization: 'fallacy_list',
+    temperature: 0.35,
+    instruction:
+      'Identify up to 6 classic exam traps, tricky edge cases, and common student mistakes for this topic. For each, put the tempting wrong instinct in "claim", the trap category (e.g. Sign Error, Forgotten Condition, Edge Case) in "fallacy_type", and the exact fix in "explanation". Respond with {"visualization_type":"fallacy_list","fallacies":[{"claim":"What students mistakenly do or assume.","fallacy_type":"Forgotten Condition","explanation":"How professors test this and how to avoid the trap."}]}.',
+  },
+  {
+    id: 'practice',
+    label: 'Practice problems',
+    description: 'Fresh conceptual and worked problems inspired by your material.',
+    visualization: 'qa_grid',
+    temperature: 0.55,
+    instruction:
+      'Generate fresh exam-style practice problems based on the material (using new numbers or scenarios, not copying verbatim). Put 4 conceptual check problems in "why_questions" and 4 step-by-step calculation/application problems with brief final answers in parentheses in "how_questions". Respond with {"visualization_type":"qa_grid","why_questions":["Conceptual problem 1..."],"how_questions":["Applied problem 1... (Hint/Answer: ...)"]}.',
+  },
+  {
+    id: 'synthesize',
+    label: 'Connect files',
+    description: 'Cross-document synthesis of overlaps, gaps, and differing emphases.',
+    visualization: 'venn_diagram',
+    temperature: 0.35,
+    instruction:
+      'Synthesize across the attached documents or sections. Identify the two primary sources or viewpoints, list what each emphasizes uniquely (including notation differences or skipped details) in uniqueA and uniqueB, and list the core principles both agree on in overlap. Respond with {"visualization_type":"venn_diagram","subjectA":"Source / Perspective A","subjectB":"Source / Perspective B","uniqueA":["Unique point or emphasis in A."],"uniqueB":["Unique point or emphasis in B."],"overlap":["Shared core idea."]}',
   },
 ];
 

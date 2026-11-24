@@ -85,6 +85,7 @@ const MathNode = memo(function MathNode({
   latex,
   source,
   display,
+  inline,
   anchor,
   macros,
   macrosKey,
@@ -92,6 +93,7 @@ const MathNode = memo(function MathNode({
   latex: string;
   source: string;
   display: boolean;
+  inline?: boolean;
   anchor?: string | null;
   macros: MacroMap;
   macrosKey: string;
@@ -101,13 +103,15 @@ const MathNode = memo(function MathNode({
     useFormula.getState().open({ latex, display: true, macros, macrosKey, source });
   if (!rendered.html) return <code className="md-inline-code md-math-error" title={rendered.error ?? undefined}>{source}</code>;
   if (display) {
+    const Wrapper = inline ? 'span' : 'div';
+    const Body = inline ? 'span' : 'div';
     return (
-      <div className={cn('md-math', rendered.error && 'md-math-has-error')} dir="ltr" id={anchor ?? undefined} onDoubleClick={openFormula}>
-        <div className="md-math-body" dangerouslySetInnerHTML={{ __html: rendered.html }} title={rendered.error ?? undefined} />
+      <Wrapper className={cn('md-math', inline && 'md-math-in-p', rendered.error && 'md-math-has-error')} dir="ltr" id={anchor ?? undefined} onDoubleClick={openFormula}>
+        <Body className="md-math-body" dangerouslySetInnerHTML={{ __html: rendered.html }} title={rendered.error ?? undefined} />
         <button type="button" className="md-math-zoom" onClick={openFormula} title="Enlarge formula" aria-label="Enlarge formula">
           <Maximize2 size={13} />
         </button>
-      </div>
+      </Wrapper>
     );
   }
   return (
@@ -294,7 +298,7 @@ function renderInline(nodes: Inline[], context: RenderContext): React.ReactNode[
         const source = plan ? plan.latex : node.value;
         if (!source.trim()) return null;
         const resolved = resolveMathRefs(source, context.model.labels);
-        return <MathNode key={index} latex={resolved} source={source} display={node.display} macros={context.macros} macrosKey={context.model.macrosKey} />;
+        return <MathNode key={index} latex={resolved} source={source} display={node.display} inline macros={context.macros} macrosKey={context.model.macrosKey} />;
       }
       case 'break':
         return <br key={index} />;

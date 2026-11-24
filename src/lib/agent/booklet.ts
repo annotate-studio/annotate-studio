@@ -141,7 +141,7 @@ export async function makeBooklet(options: BookletOptions): Promise<{ path: stri
 
   const sample = chunks.slice(0, 6).map((chunk) => chunk.text.slice(0, 2000)).join('\n');
   const persian = hasPersianLetters(sample) || detectDirection(options.instructions ?? '') === 'rtl';
-  const language = persian ? 'Persian (فارسی), keeping technical terms and formulas as in the sources' : 'the language of the sources';
+  const language = persian ? 'Persian, keeping technical terms and formulas as in the sources' : 'the language of the sources';
   const extra = options.instructions?.trim() ? `\n\nLearner's instructions: ${options.instructions.trim()}` : '';
 
   for (let i = 0; i < chunks.length; i += 1) {

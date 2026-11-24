@@ -5,9 +5,11 @@ import {
   Bot,
   Columns3,
   FilePlus2,
+  Focus,
   Grid2x2,
   ImagePlus,
   LayoutDashboard,
+  Link2,
   Lock,
   Maximize,
   Minus,
@@ -15,6 +17,7 @@ import {
   Plus,
   Redo2,
   Rows3,
+  StickyNote,
   Undo2,
   Unlock,
 } from 'lucide-react';
@@ -67,6 +70,9 @@ function CanvasToolbar() {
   const canUndo = useCanvas((state) => state.past.length > 0);
   const canRedo = useCanvas((state) => state.future.length > 0);
   const locked = useCanvas((state) => state.locked);
+  const spotlight = useCanvas((state) => state.spotlight);
+  const connectFromId = useCanvas((state) => state.connectFromId);
+  const selectedId = useCanvas((state) => state.selectedId);
   const chatOpen = useApp((state) => state.chatOpen);
   const toggleChat = useApp((state) => state.toggleChat);
   const zoom = workspace.view.zoom;
@@ -87,8 +93,44 @@ function CanvasToolbar() {
         <ImagePlus size={14} />
         <span className="toolbar-label">Image</span>
       </button>
+      <button
+        type="button"
+        className="toolbar-btn"
+        onClick={() => canvas().openResource({ type: 'sticky', title: 'Takeaway', content: '' })}
+        title="Add a quick takeaway sticky card"
+      >
+        <StickyNote size={14} />
+        <span className="toolbar-label">Sticky</span>
+      </button>
       <div className="toolbar-divider" />
       <ArrangeMenu disabled={!hasWindows} />
+      <button
+        type="button"
+        className={cn('toolbar-btn', Boolean(connectFromId) && 'toolbar-btn-active')}
+        disabled={!hasWindows}
+        onClick={() => {
+          if (connectFromId) canvas().startConnect(null);
+          else if (selectedId) canvas().startConnect(selectedId);
+          else {
+            const first = workspace.resources.find((r) => !r.minimized);
+            if (first) canvas().startConnect(first.id);
+          }
+        }}
+        title={connectFromId ? 'Cancel connecting (Esc)' : 'Connect selected window to another window'}
+      >
+        <Link2 size={14} />
+        <span className="toolbar-label">{connectFromId ? 'Pick target…' : 'Link'}</span>
+      </button>
+      <button
+        type="button"
+        className={cn('toolbar-btn', spotlight && 'toolbar-btn-active')}
+        disabled={!hasWindows}
+        onClick={() => canvas().setSpotlight(!spotlight)}
+        title={spotlight ? 'Turn off Spotlight focus mode' : 'Spotlight mode — dim unselected windows'}
+      >
+        <Focus size={14} />
+        <span className="toolbar-label">Spotlight</span>
+      </button>
       <button type="button" className="toolbar-btn" onClick={() => canvas().undo()} disabled={!canUndo} title="Undo layout change (Ctrl+Z)">
         <Undo2 size={14} />
       </button>

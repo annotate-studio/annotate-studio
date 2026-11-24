@@ -3,11 +3,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   BookOpenCheck,
-  Bot,
   CheckSquare,
   ExternalLink,
   NotebookText,
-  ScanText,
   Square,
   X,
   FileImage,
@@ -155,6 +153,21 @@ export default function LibraryTab() {
     setSelected(new Set());
   };
 
+  const removeSelected = async (paths: string[]) => {
+    if (paths.length === 0) return;
+    const ok = await confirmDialog({
+      title: `Delete ${paths.length} selected file${paths.length === 1 ? '' : 's'}?`,
+      message: 'The selected files will be removed from your workspace and closed on every canvas. This cannot be undone.',
+      confirmLabel: `Delete ${paths.length} file${paths.length === 1 ? '' : 's'}`,
+      danger: true,
+    });
+    if (!ok) return;
+    for (const path of paths) {
+      await deleteFile(path);
+    }
+    setSelected(new Set());
+  };
+
   const makeBooklet = async (paths: string[]) => {
     const title = await promptDialog({ title: 'Make a study booklet', message: `From ${paths.length} file${paths.length === 1 ? '' : 's'}. The agent reads them (with OCR for scanned pages) and writes one structured note.`, initialValue: 'Study booklet', confirmLabel: 'Make booklet' });
     if (!title) return;
@@ -164,10 +177,6 @@ export default function LibraryTab() {
   const menuFor = (file: StudyFile): MenuEntry[] => {
     const items: MenuEntry[] = [];
     if (resourceTypeFor(file)) items.push({ label: 'Open on canvas', icon: <ExternalLink size={13} />, onSelect: () => open(file) });
-    items.push({ label: 'Ask the agent…', icon: <Bot size={13} />, onSelect: () => askAgent([file.path], '', false) });
-    if (file.file_type === 'Pdf' || file.file_type === 'Image') {
-      items.push({ label: 'Transcribe with OCR', icon: <ScanText size={13} />, onSelect: () => askAgent([file.path], '/ocr', true) });
-    }
     items.push({ label: 'Make a study booklet…', icon: <NotebookText size={13} />, onSelect: () => void makeBooklet([file.path]) });
     if (file.file_type !== 'Image') {
       items.push(
@@ -227,11 +236,8 @@ export default function LibraryTab() {
           <button type="button" className="btn btn-primary btn-sm" onClick={() => void makeBooklet(Array.from(selected))}>
             <NotebookText size={14} /> Make booklet
           </button>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => askAgent(Array.from(selected), '', false)}>
-            <Bot size={14} /> Ask the agent
-          </button>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => askAgent(Array.from(selected).filter((path) => /\.(pdf|png|jpe?g|webp|gif|bmp|avif)$/i.test(path)), '/ocr', true)}>
-            <ScanText size={14} /> OCR
+          <button type="button" className="btn btn-danger btn-sm" onClick={() => void removeSelected(Array.from(selected))}>
+            <Trash2 size={14} /> Delete
           </button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set(visible.map((file) => file.path)))}>
             <CheckSquare size={14} /> All

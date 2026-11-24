@@ -9,7 +9,6 @@ import {
   HeartHandshake,
   Layers,
   LayoutGrid,
-  ScanText,
   Settings,
   Timer,
 } from 'lucide-react';
@@ -28,11 +27,10 @@ interface NavItem {
 const NAV: NavItem[] = [
   { view: 'canvas', label: 'Canvas', icon: <LayoutGrid size={19} />, shortcut: 'Ctrl+1' },
   { view: 'library', label: 'Library', icon: <FolderOpen size={19} />, shortcut: 'Ctrl+2' },
-  { view: 'ocr', label: 'OCR', icon: <ScanText size={19} />, shortcut: 'Ctrl+3' },
-  { view: 'flashcards', label: 'Flashcards', icon: <Layers size={19} />, shortcut: 'Ctrl+4' },
-  { view: 'exams', label: 'Exams', icon: <FileQuestion size={19} />, shortcut: 'Ctrl+5' },
-  { view: 'pomodoro', label: 'Pomodoro', icon: <Timer size={19} />, shortcut: 'Ctrl+6' },
-  { view: 'motivation', label: 'Motivation', icon: <HeartHandshake size={19} />, shortcut: 'Ctrl+7' },
+  { view: 'flashcards', label: 'Flashcards', icon: <Layers size={19} />, shortcut: 'Ctrl+3' },
+  { view: 'exams', label: 'Exams', icon: <FileQuestion size={19} />, shortcut: 'Ctrl+4' },
+  { view: 'pomodoro', label: 'Pomodoro', icon: <Timer size={19} />, shortcut: 'Ctrl+5' },
+  { view: 'motivation', label: 'Motivation', icon: <HeartHandshake size={19} />, shortcut: 'Ctrl+6' },
 ];
 
 function NavButton({ item, active, expanded, badge, extra }: { item: NavItem; active: boolean; expanded: boolean; badge?: number; extra?: string }) {

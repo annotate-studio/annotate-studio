@@ -106,7 +106,9 @@ export default function ReviewSession({ cardIds, title, practice = false, onExit
           </span>
         </div>
       </div>
-      <ReviewCard card={current} flipped={flipped} saving={saving} scheduled={scheduled} onFlip={() => setFlipped((v) => !v)} onRate={(quality) => void rate(quality)} />
+      <div className="review-stage">
+        <ReviewCard card={current} flipped={flipped} saving={saving} scheduled={scheduled} onFlip={() => setFlipped((v) => !v)} onRate={(quality) => void rate(quality)} />
+      </div>
     </div>
   );
 }

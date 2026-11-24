@@ -77,12 +77,12 @@ const PANES: { id: Pane; label: string; icon: React.ReactNode }[] = [
 const THEME_PREVIEW: Record<ThemeMode, { label: string; bg: string; card: string; text: string }> = {
   white: { label: 'Light', bg: '#F6F7F9', card: '#FFFFFF', text: '#0F172A' },
   black: { label: 'Dark', bg: '#0B0B0E', card: '#18181B', text: '#FAFAFA' },
-  sepia: { label: 'Sepia', bg: '#F4ECDD', card: '#FFF8EE', text: '#2C1810' },
-  gray: { label: 'Gray', bg: '#E9EAEE', card: '#FAFAFB', text: '#1F2024' },
-  forest: { label: 'Forest', bg: '#E8F1E8', card: '#F8FFF8', text: '#1A2E1A' },
-  ocean: { label: 'Ocean', bg: '#E4F0F6', card: '#F4FAFD', text: '#0C2D48' },
-  lavender: { label: 'Lavender', bg: '#EEE7F6', card: '#FAF7FD', text: '#1E0A3C' },
-  rose: { label: 'Rose', bg: '#FBEAEA', card: '#FFFAFA', text: '#3C1010' },
+  midnight: { label: 'Midnight', bg: '#0B1020', card: '#131B31', text: '#E6EDF7' },
+  nord: { label: 'Nordic', bg: '#1D2330', card: '#262E3F', text: '#ECEFF4' },
+  emerald: { label: 'Evergreen', bg: '#0C1714', card: '#13231E', text: '#E7F3EE' },
+  amethyst: { label: 'Amethyst', bg: '#120E1D', card: '#1B152C', text: '#F1ECFA' },
+  espresso: { label: 'Espresso', bg: '#161210', card: '#211B18', text: '#F5EDE4' },
+  paper: { label: 'Warm Paper', bg: '#FAF6EE', card: '#FFFDF9', text: '#1F1B16' },
 };
 
 const ACCENTS = ['#2563EB', '#7C3AED', '#DB2777', '#DC2626', '#EA580C', '#16A34A', '#0D9488', '#0891B2'];
@@ -105,7 +105,7 @@ const MODEL_HINTS: Record<string, string> = {
 };
 
 const SHORTCUTS: { keys: string; action: string }[] = [
-  { keys: 'Ctrl + 1…7 / Ctrl + ,', action: 'Go to canvas, library, OCR, flashcards, exams, pomodoro, motivation / settings' },
+  { keys: 'Ctrl + 1…6 / Ctrl + ,', action: 'Go to canvas, library, flashcards, exams, pomodoro, motivation / settings' },
   { keys: 'Ctrl + J', action: 'Show or hide the assistant' },
   { keys: 'Drag background / Space + drag / middle mouse', action: 'Pan the canvas' },
   { keys: 'Ctrl + scroll, pinch', action: 'Zoom the canvas around the pointer' },

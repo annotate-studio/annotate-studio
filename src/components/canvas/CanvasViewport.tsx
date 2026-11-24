@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FilePlus2, ImagePlus, LayoutGrid, Lock, NotebookPen, Unlock, Upload } from 'lucide-react';
 import CanvasWindow from './CanvasWindow';
+import ConnectionLayer from './ConnectionLayer';
 import Minimap from './Minimap';
 import MinimizedDock from './MinimizedDock';
 import { openContextMenu } from '@/components/ui/ContextMenu';
@@ -240,7 +241,8 @@ export default function CanvasViewport() {
       } else if (event.shiftKey && !mod && event.code === 'Digit1' && !frozen) state.fitToContent();
       else if (event.shiftKey && !mod && event.code === 'Digit2' && !frozen && state.selectedId) state.fitToContent([state.selectedId]);
       else if (key === 'escape') {
-        if (current.resources.some((r) => r.maximized)) state.exitMaximize();
+        if (state.connectFromId) state.startConnect(null);
+        else if (current.resources.some((r) => r.maximized)) state.exitMaximize();
         else if (state.selectedId) state.select(null);
         else handled = false;
       } else if (mod && event.altKey && key === 'n') void createNewNote();
@@ -374,6 +376,7 @@ export default function CanvasViewport() {
         style={{ backgroundSize: `${step}px ${step}px`, backgroundPosition: `${view.x}px ${view.y}px` }}
       />
       <div ref={worldRef} className="canvas-world" style={{ transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.zoom})` }}>
+        <ConnectionLayer />
         {workspace.resources.map((resource) => (
           <CanvasWindow key={resource.id} resource={resource} />
         ))}

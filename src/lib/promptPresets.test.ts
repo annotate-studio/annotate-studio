@@ -5,7 +5,21 @@ import { VISUALIZATION_TYPES } from './visualizations.ts';
 
 test('offers every ready-made prompt exactly once', () => {
   const ids = PROMPT_PRESETS.map((preset) => preset.id);
-  assert.deepEqual(ids, ['summary', 'key-notes', 'compare', 'timeline', 'mindmap', 'why-how', 'cheat-sheet', 'contradictions']);
+  assert.deepEqual(ids, [
+    'summary',
+    'key-notes',
+    'compare',
+    'timeline',
+    'mindmap',
+    'why-how',
+    'cheat-sheet',
+    'contradictions',
+    'feynman',
+    'analogy',
+    'exam-traps',
+    'practice',
+    'synthesize',
+  ]);
   assert.equal(new Set(ids).size, ids.length);
 });
 

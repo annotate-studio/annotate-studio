@@ -12,8 +12,10 @@ import {
   FileText,
   Layers,
   Loader2,
+  Maximize2,
   Presentation,
   RotateCcw,
+  Sparkles,
   Swords,
   Undo2,
   XCircle,
@@ -23,12 +25,17 @@ import FileLabel from '@/components/ui/FileLabel';
 import DiffView from '@/components/ui/DiffView';
 import type { ChatMessage, ChatStep } from '@/store/sessions';
 import VisualizationView from './VisualizationView';
+import VisualizationDialog, { visualizationSummary, visualizationTitle } from './VisualizationDialog';
 import { useApp } from '@/store/app';
 import { useLibrary } from '@/store/library';
+import { useFlashcards, UNSORTED_ID } from '@/store/flashcards';
+import { createFlashcard } from '@/lib/tauri-commands';
+import { toast } from '@/store/toast';
 import { copyText, cn, baseName } from '@/lib/utils';
 import { isRtlText } from '@/lib/bidi';
 import { splitLesson } from '@/lib/ai';
 import { openFileOnCanvas } from '@/lib/workspace-actions';
+import type { Visualization } from '@/lib/visualizations';
 
 interface ChatMessagesProps {
   messages: ChatMessage[];
@@ -116,28 +123,49 @@ function Reasoning({ text, live }: { text: string; live: boolean }) {
 
 const MessageBubble = memo(function MessageBubble({
   message,
+  previousUserPrompt,
   onRetry,
   onRevert,
   onOpenLesson,
+  onOpenVisual,
   onChallenge,
   onUndo,
   canUndo,
 }: {
   message: ChatMessage;
+  previousUserPrompt?: string;
   onRetry: (id: string) => void;
   onRevert?: (id: string) => void;
   onOpenLesson: (topic: string, steps: string[]) => void;
+  onOpenVisual: (viz: Visualization) => void;
   onChallenge?: (id: string) => void;
   onUndo?: (messageId: string, stepId: string) => void;
   canUndo?: (stepId: string) => boolean;
 }) {
   const [copied, setCopied] = useState(false);
+  const [savedCard, setSavedCard] = useState(false);
   const setView = useApp((state) => state.setView);
   useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(false), 1500);
     return () => clearTimeout(timer);
   }, [copied]);
+
+  const saveToFlashcard = async () => {
+    if (savedCard || !message.content.trim()) return;
+    const front = (previousUserPrompt?.trim() || 'Key takeaway').slice(0, 280);
+    const back = message.content.trim().slice(0, 1200);
+    try {
+      const activeCollection = useFlashcards.getState().activeCollectionId;
+      const collectionId = activeCollection && activeCollection !== UNSORTED_ID ? activeCollection : undefined;
+      const card = await createFlashcard(front, back, undefined, collectionId);
+      useFlashcards.getState().addCards([card]);
+      setSavedCard(true);
+      toast.success('Saved as flashcard');
+    } catch (error) {
+      toast.error('Could not save flashcard', error);
+    }
+  };
 
   if (message.role === 'user') {
     return (
@@ -211,7 +239,32 @@ const MessageBubble = memo(function MessageBubble({
             ))}
           </div>
         )}
-        {message.visualization ? <VisualizationView data={message.visualization} /> : message.content && <MarkdownRenderer content={message.content} />}
+        {message.visualization ? (
+          message.visualization.type === 'text' ? (
+            <VisualizationView data={message.visualization} />
+          ) : (
+            <div className="viz-launch-card">
+              <div className="viz-launch-info">
+                <span className="viz-launch-icon">
+                  <Sparkles size={15} />
+                </span>
+                <div className="viz-launch-text">
+                  <strong dir="auto">{visualizationTitle(message.visualization)}</strong>
+                  <span>{visualizationSummary(message.visualization)}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => onOpenVisual(message.visualization!)}
+              >
+                <Maximize2 size={13} /> Open visual
+              </button>
+            </div>
+          )
+        ) : (
+          message.content && <MarkdownRenderer content={message.content} />
+        )}
         {streaming && (
           <div className="chat-streaming">
             <span className="typing-dots">
@@ -243,6 +296,11 @@ const MessageBubble = memo(function MessageBubble({
                 <button type="button" onClick={() => void copyText(message.content).then(setCopied)} title="Copy">
                   {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy'}
                 </button>
+                {message.content.length > 20 && (
+                  <button type="button" onClick={() => void saveToFlashcard()} disabled={savedCard} title="Save this answer as a flashcard">
+                    {savedCard ? <Check size={12} /> : <Layers size={12} />} {savedCard ? 'Saved' : 'Flashcard'}
+                  </button>
+                )}
                 {lessonSteps.length > 1 && (
                   <button
                     type="button"
@@ -269,6 +327,7 @@ const MessageBubble = memo(function MessageBubble({
 export default function ChatMessages({ messages, busy, status, onRetry, onRevert, onOpenLesson, onChallenge, onUndo, canUndo, emptyHint }: ChatMessagesProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
+  const [activeVisual, setActiveVisual] = useState<Visualization | null>(null);
   const streamingVisible = messages.some((message) => message.streaming);
 
   useEffect(() => {
@@ -286,18 +345,26 @@ export default function ChatMessages({ messages, busy, status, onRetry, onRevert
       }}
     >
       {messages.length === 0 && !busy && <div className="chat-empty">{emptyHint}</div>}
-      {messages.map((message) => (
-        <MessageBubble
-          key={message.id}
-          message={message}
-          onRetry={onRetry}
-          onRevert={onRevert}
-          onOpenLesson={onOpenLesson}
-          onChallenge={onChallenge}
-          onUndo={onUndo}
-          canUndo={canUndo}
-        />
-      ))}
+      {messages.map((message, index) => {
+        const prevUser =
+          message.role === 'assistant'
+            ? [...messages.slice(0, index)].reverse().find((m) => m.role === 'user')?.content
+            : undefined;
+        return (
+          <MessageBubble
+            key={message.id}
+            message={message}
+            previousUserPrompt={prevUser}
+            onRetry={onRetry}
+            onRevert={onRevert}
+            onOpenLesson={onOpenLesson}
+            onOpenVisual={setActiveVisual}
+            onChallenge={onChallenge}
+            onUndo={onUndo}
+            canUndo={canUndo}
+          />
+        );
+      })}
       {busy && !streamingVisible && (
         <div className="chat-row chat-row-assistant">
           <div className="chat-typing">
@@ -310,6 +377,7 @@ export default function ChatMessages({ messages, busy, status, onRetry, onRevert
           </div>
         </div>
       )}
+      <VisualizationDialog data={activeVisual} onClose={() => setActiveVisual(null)} />
     </div>
   );
 }

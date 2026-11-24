@@ -12,6 +12,7 @@ import {
   type StudyFile,
 } from './tauri-commands';
 import { extractPdfText, type ExtractedPdfText } from './pdf-engine';
+import { parsePageFragment, requestPdfPageJump } from './pdf-nav';
 import { baseName, extensionOf, stripExtension } from './utils';
 import { useApp } from '@/store/app';
 import { useCanvas, type OpenOptions, type ResourceType } from '@/store/canvas';
@@ -154,9 +155,11 @@ export async function openWikiLink(target: string, near?: string) {
   const library = useLibrary.getState();
   const files = library.loaded ? library.files : await library.refresh();
   const file = resolveWikiLink(files, target);
+  const page = parsePageFragment(target);
   useApp.getState().setView('canvas');
   if (file) {
     openFileOnCanvas(file, near ? { near } : {});
+    if (page && file.file_type === 'Pdf') requestPdfPageJump(file.path, page);
     return;
   }
   const create = await confirmDialog({

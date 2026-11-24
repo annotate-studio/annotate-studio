@@ -8,6 +8,7 @@ import {
   errorMessage,
   generateFlashcards,
   onGenerationProgress,
+  type ContentPart,
   type StudyFile,
   type TurnMessage,
 } from '@/lib/tauri-commands';
@@ -18,12 +19,13 @@ import { hasReadableText } from '@/lib/pdf-engine';
 import { readDocumentText } from '@/lib/workspace-actions';
 import { baseName, stripExtension, uid } from '@/lib/utils';
 import { normalizeForSearch } from '@/lib/bidi';
-import { AGENT_PROMPT, CHAT_PROMPT, CRITIC_PROMPT, DEEP_THINKING_PROMPT, PRESETS } from '@/lib/agent/prompts';
+import { AGENT_PROMPT, CHAT_PROMPT, CRITIC_PROMPT, DEEP_THINKING_PROMPT, PRESETS, SOCRATIC_PROMPT } from '@/lib/agent/prompts';
 import { ensureProviders, inputBudget, modelFor, canSeeImages } from '@/lib/agent/models';
 import { historyMessages, MEMORY_PROMPT, planHistory, text as textMessage } from '@/lib/agent/context';
 import { runAgent, type AgentStep } from '@/lib/agent/runner';
 import { revertUndo, toolsFor, type ToolContext } from '@/lib/agent/tools';
 import { makeBooklet } from '@/lib/agent/booklet';
+import { imageFilePart, isImage } from '@/lib/agent/documents';
 import { hasUndo, rememberUndo, takeUndo, workspaceManifest } from '@/lib/agent/workspace';
 import { useApp } from '@/store/app';
 import { useChatSessions, type ChatReplay, type ChatStep } from '@/store/sessions';
@@ -49,6 +51,7 @@ export interface LessonState {
 
 export interface SendOptions {
   deep?: boolean;
+  socratic?: boolean;
   preset?: string;
 }
 
@@ -364,6 +367,7 @@ export function useChatEngine() {
         let userText = preset ? `${preset.instruction}\n\n${input}` : input;
         let system = agentMode ? AGENT_PROMPT : CHAT_PROMPT;
         if (deep) system += `\n\n${DEEP_THINKING_PROMPT}`;
+        if (options.socratic) system += `\n\n${SOCRATIC_PROMPT}`;
         if (agentMode) {
           const manifest = await workspaceManifest(focus);
           system += `\n\nToday is ${new Date().toISOString().slice(0, 10)}. Model roles: routine ${routine?.model ?? 'none'}, reasoning ${reasoner?.model ?? 'none'}, vision ${vision?.model ?? 'none'}.\n\nWorkspace files\n${manifest}`;
@@ -373,7 +377,20 @@ export function useChatEngine() {
           if (context) userText = `${context}\n\n${userText}`;
         }
         if (id !== requestRef.current) return;
-        const messages: TurnMessage[] = [textMessage('system', system), ...history, textMessage('user', userText)];
+        const attachedImages = active.filter((a) => isImage(a.path));
+        let userMessage: TurnMessage = textMessage('user', userText);
+        if (attachedImages.length > 0 && canSeeImages(provider)) {
+          const parts: ContentPart[] = [{ type: 'text', text: userText }];
+          for (const img of attachedImages.slice(0, 4)) {
+            try {
+              parts.push(await imageFilePart(img.path));
+            } catch {
+              // fallback to agent tool if file read fails
+            }
+          }
+          if (parts.length > 1) userMessage = { role: 'user', content: parts };
+        }
+        const messages: TurnMessage[] = [textMessage('system', system), ...history, userMessage];
         const context: ToolContext = {
           requestId: request.requestId,
           readPaths: new Set(),

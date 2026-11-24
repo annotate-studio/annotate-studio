@@ -3,7 +3,15 @@ import { loadCanvasState, saveCanvasState } from '@/lib/tauri-commands';
 import { createSaver } from '@/lib/persist';
 import { clamp, uid } from '@/lib/utils';
 
-export type ResourceType = 'pdf' | 'note' | 'image';
+export type ResourceType = 'pdf' | 'note' | 'image' | 'sticky';
+export type StickyColor = 'yellow' | 'blue' | 'green' | 'pink' | 'purple';
+
+export interface CanvasConnection {
+  id: string;
+  fromId: string;
+  toId: string;
+  label?: string;
+}
 
 export interface CanvasView {
   x: number;
@@ -17,6 +25,7 @@ export interface Resource {
   title: string;
   filePath?: string;
   content?: string;
+  stickyColor?: StickyColor;
   x: number;
   y: number;
   width: number;
@@ -33,6 +42,7 @@ export interface Workspace {
   resources: Resource[];
   view: CanvasView;
   filePaths: string[];
+  connections: CanvasConnection[];
 }
 
 export interface Rect {
@@ -55,6 +65,7 @@ export const DEFAULT_SIZES: Record<ResourceType, { width: number; height: number
   pdf: { width: 760, height: 880 },
   note: { width: 680, height: 560 },
   image: { width: 560, height: 440 },
+  sticky: { width: 320, height: 240 },
 };
 
 export interface OpenResourceInput {
@@ -62,6 +73,7 @@ export interface OpenResourceInput {
   title: string;
   filePath?: string;
   content?: string;
+  stickyColor?: StickyColor;
   width?: number;
   height?: number;
 }
@@ -80,6 +92,8 @@ export interface CanvasStore {
   activeWorkspaceId: string;
   selectedId: string | null;
   locked: boolean;
+  spotlight: boolean;
+  connectFromId: string | null;
   viewport: { width: number; height: number };
   past: Resource[][];
   future: Resource[][];
@@ -91,6 +105,11 @@ export interface CanvasStore {
   registerFileInWorkspace: (path: string, workspaceId?: string) => void;
   removeFileFromWorkspace: (path: string, workspaceId?: string) => void;
   seedWorkspaceFiles: (paths: string[]) => void;
+  setSpotlight: (enabled: boolean) => void;
+  startConnect: (fromId: string | null) => void;
+  addConnection: (fromId: string, toId: string, label?: string) => void;
+  updateConnection: (id: string, label: string) => void;
+  removeConnection: (id: string) => void;
   setView: (view: CanvasView) => void;
   panBy: (dx: number, dy: number) => void;
   zoomAt: (zoom: number, anchor?: { x: number; y: number }) => void;
@@ -122,7 +141,7 @@ export function activeWorkspace(state: Pick<CanvasStore, 'workspaces' | 'activeW
 }
 
 function newWorkspace(name: string, id: string = uid()): Workspace {
-  return { id, name, resources: [], view: { ...DEFAULT_VIEW }, filePaths: [] };
+  return { id, name, resources: [], view: { ...DEFAULT_VIEW }, filePaths: [], connections: [] };
 }
 
 function finiteOr(value: unknown, fallback: number): number {
@@ -140,13 +159,16 @@ export function toWorkspaceRelative(path: string): string {
 }
 
 function isResourceType(value: unknown): value is ResourceType {
-  return value === 'pdf' || value === 'note' || value === 'image';
+  return value === 'pdf' || value === 'note' || value === 'image' || value === 'sticky';
 }
+
+const STICKY_COLORS: StickyColor[] = ['yellow', 'blue', 'green', 'pink', 'purple'];
 
 function migrateResource(raw: unknown, index: number): Resource | null {
   if (!raw || typeof raw !== 'object') return null;
   const data = raw as Record<string, unknown>;
-  const type = data.type === 'sticky' ? 'note' : data.type;
+  const filePath = typeof data.filePath === 'string' && data.filePath.trim() ? toWorkspaceRelative(data.filePath.trim()) : undefined;
+  const type = data.type === 'sticky' && filePath ? 'note' : data.type;
   if (!isResourceType(type)) return null;
   const position = (data.position ?? {}) as Record<string, unknown>;
   const size = (data.size ?? {}) as Record<string, unknown>;
@@ -157,14 +179,15 @@ function migrateResource(raw: unknown, index: number): Resource | null {
   const baseY = wasFullscreen && previous ? previous.y : data.y ?? position.y;
   const baseW = wasFullscreen && previous ? previous.width : data.width ?? size.width;
   const baseH = wasFullscreen && previous ? previous.height : data.height ?? size.height;
-  const filePath = typeof data.filePath === 'string' && data.filePath.trim() ? toWorkspaceRelative(data.filePath.trim()) : undefined;
   const content = typeof data.content === 'string' ? data.content : undefined;
+  const stickyColor = STICKY_COLORS.includes(data.stickyColor as StickyColor) ? (data.stickyColor as StickyColor) : undefined;
   return {
     id: typeof data.id === 'string' && data.id ? data.id : uid(),
     type,
-    title: typeof data.title === 'string' && data.title.trim() ? data.title : 'Untitled',
+    title: typeof data.title === 'string' && data.title.trim() ? data.title : type === 'sticky' ? 'Takeaway' : 'Untitled',
     filePath,
-    content: type === 'note' ? content : undefined,
+    content: type === 'note' || type === 'sticky' ? content : undefined,
+    stickyColor: type === 'sticky' ? stickyColor ?? 'yellow' : undefined,
     x: finiteOr(baseX, 80 + index * 32),
     y: finiteOr(baseY, 80 + index * 32),
     width: Math.max(MIN_WINDOW_WIDTH, finiteOr(baseW, defaults.width)),
@@ -228,6 +251,25 @@ function migrateFilePaths(raw: unknown, resources: Resource[]): { filePaths: str
   return { filePaths: Array.from(paths), hadField };
 }
 
+function migrateConnections(raw: unknown, resources: Resource[]): CanvasConnection[] {
+  if (!Array.isArray(raw)) return [];
+  const valid = new Set(resources.map((r) => r.id));
+  const out: CanvasConnection[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const data = item as Record<string, unknown>;
+    if (typeof data.fromId !== 'string' || typeof data.toId !== 'string') continue;
+    if (data.fromId === data.toId || !valid.has(data.fromId) || !valid.has(data.toId)) continue;
+    out.push({
+      id: typeof data.id === 'string' && data.id ? data.id : uid(),
+      fromId: data.fromId,
+      toId: data.toId,
+      label: typeof data.label === 'string' && data.label.trim() ? data.label.trim() : undefined,
+    });
+  }
+  return out;
+}
+
 export function migrateCanvasState(raw: unknown): { workspaces: Workspace[]; activeWorkspaceId: string; needsFileMigration: boolean } {
   const data = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   let workspaces: Workspace[] = [];
@@ -245,12 +287,13 @@ export function migrateCanvasState(raw: unknown): { workspaces: Workspace[]; act
           resources,
           view: migrateView(w.view ?? w.canvasView),
           filePaths,
+          connections: migrateConnections(w.connections, resources),
         };
       });
   } else if (Array.isArray(data.resources)) {
     const resources = migrateResources(data.resources);
     const { filePaths } = migrateFilePaths(undefined, resources);
-    workspaces = [{ id: 'default', name: 'Default Workspace', resources, view: migrateView(data.view), filePaths }];
+    workspaces = [{ id: 'default', name: 'Default Workspace', resources, view: migrateView(data.view), filePaths, connections: [] }];
   }
   const unique = new Map<string, Workspace>();
   for (const workspace of workspaces) if (!unique.has(workspace.id)) unique.set(workspace.id, workspace);
@@ -367,6 +410,8 @@ export const useCanvas = create<CanvasStore>((set, get) => {
     activeWorkspaceId: 'default',
     selectedId: null,
     locked: false,
+    spotlight: false,
+    connectFromId: null,
     viewport: { width: 1200, height: 800 },
     past: [],
     future: [],
@@ -528,6 +573,32 @@ export const useCanvas = create<CanvasStore>((set, get) => {
       set({ viewport: size });
     },
     setLocked: (locked) => set({ locked }),
+    setSpotlight: (spotlight) => set({ spotlight }),
+    startConnect: (connectFromId) => set({ connectFromId }),
+    addConnection: (fromId, toId, label) => {
+      if (fromId === toId) return;
+      updateActive((w) => {
+        const exists = w.connections.some((c) => (c.fromId === fromId && c.toId === toId) || (c.fromId === toId && c.toId === fromId));
+        if (exists) return w;
+        return {
+          ...w,
+          connections: [...w.connections, { id: uid(), fromId, toId, label: label?.trim() || undefined }],
+        };
+      });
+      set({ connectFromId: null });
+    },
+    updateConnection: (id, label) => {
+      updateActive((w) => ({
+        ...w,
+        connections: w.connections.map((c) => (c.id === id ? { ...c, label: label.trim() || undefined } : c)),
+      }));
+    },
+    removeConnection: (id) => {
+      updateActive((w) => ({
+        ...w,
+        connections: w.connections.filter((c) => c.id !== id),
+      }));
+    },
 
     openResource: (input, options = {}) => {
       const resources = active().resources;
@@ -569,6 +640,7 @@ export const useCanvas = create<CanvasStore>((set, get) => {
         title: input.title,
         filePath: input.filePath,
         content: input.content,
+        stickyColor: input.type === 'sticky' ? input.stickyColor ?? 'yellow' : undefined,
         ...position,
         ...size,
         z: topZ(resources) + 1,

@@ -3,8 +3,10 @@ import { isTauri, loadSettings, saveSettings } from '@/lib/tauri-commands';
 import { createSaver } from '@/lib/persist';
 import { clamp } from '@/lib/utils';
 
-export const THEME_IDS = ['white', 'black', 'sepia', 'gray', 'forest', 'ocean', 'lavender', 'rose'] as const;
+export const THEME_IDS = ['white', 'black', 'midnight', 'nord', 'emerald', 'amethyst', 'espresso', 'paper'] as const;
 export type ThemeMode = (typeof THEME_IDS)[number];
+
+const DARK_THEMES = new Set<ThemeMode>(['black', 'midnight', 'nord', 'emerald', 'amethyst', 'espresso']);
 
 export const POMODORO_SOUNDS = ['beep', 'bell', 'chime', 'digital', 'none'] as const;
 export type PomodoroSound = (typeof POMODORO_SOUNDS)[number];
@@ -143,7 +145,7 @@ export function applyAppearance(
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   root.dataset.theme = settings.theme;
-  root.style.colorScheme = settings.theme === 'black' ? 'dark' : 'light';
+  root.style.colorScheme = DARK_THEMES.has(settings.theme) ? 'dark' : 'light';
   root.style.setProperty('--primary', settings.primaryColor);
   root.style.setProperty('--primary-text', readableTextColor(settings.primaryColor));
   root.style.setProperty('--math-scale', String(settings.mathScale / 100));

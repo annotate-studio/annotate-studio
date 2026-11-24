@@ -7,6 +7,7 @@ import {
   Code,
   Columns2,
   Eye,
+  EyeOff,
   FileCode2,
   FileOutput,
   Heading2,
@@ -114,6 +115,8 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
   const [mode, setModeState] = useState<Mode>(() => modeMemory.get(resourceId) ?? (width >= 760 ? 'split' : 'edit'));
   const [insertOpen, setInsertOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [recallMode, setRecallMode] = useState(false);
+  const [readProgress, setReadProgress] = useState(0);
   const [compiling, setCompiling] = useState(false);
   const [issues, setIssues] = useState<CompileIssue[] | null>(null);
   const editorRef = useRef<MarkdownEditorHandle>(null);
@@ -442,6 +445,18 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
         <button type="button" className={cn('tool-btn', direction !== 'auto' && 'tool-btn-active')} onClick={cycleDirection} title={`${directionLabel} (click to change)`}>
           {directionIcon}
         </button>
+        <button
+          type="button"
+          className={cn('tool-btn', recallMode && 'tool-btn-active')}
+          onClick={() => {
+            const next = !recallMode;
+            setRecallMode(next);
+            if (next && view === 'edit') setMode('preview');
+          }}
+          title={recallMode ? 'Turn off Active Recall blur mode' : 'Active Recall mode — blur answers, proofs & key terms until clicked'}
+        >
+          <EyeOff size={14} />
+        </button>
         <button type="button" className={cn('tool-btn', historyOpen && 'tool-btn-active')} onClick={() => setHistoryOpen((v) => !v)} title="Revision history & diff">
           <History size={14} />
         </button>
@@ -469,6 +484,11 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
           {status}
         </span>
       </div>
+      {showPreview && readProgress > 0 && (
+        <div className="reading-progress">
+          <div className="reading-progress-fill" style={{ width: `${readProgress}%` }} />
+        </div>
+      )}
       {!buffer.editable && (
         <div className="note-readonly">
           <AlertTriangle size={13} /> This file is not UTF-8 text, so it opens read-only to keep its characters intact.
@@ -518,7 +538,19 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
             <NoteHistoryPanel path={path} currentContent={buffer.content} onClose={() => setHistoryOpen(false)} />
           </div>
         ) : showPreview ? (
-          <div className="note-pane note-preview-pane content-selectable">
+          <div
+            className={cn('note-pane note-preview-pane content-selectable', recallMode && 'md-recall-mode')}
+            onScroll={(event) => {
+              const el = event.currentTarget;
+              const max = el.scrollHeight - el.clientHeight;
+              setReadProgress(max > 0 ? Math.min(100, Math.round((el.scrollTop / max) * 100)) : 0);
+            }}
+            onClick={(event) => {
+              if (!recallMode) return;
+              const target = (event.target as Element | null)?.closest('.md-env-proof, .md-env-solution, .md-env-answer, .md-callout-body, strong, .md-mark');
+              if (target) target.classList.toggle('md-revealed');
+            }}
+          >
             {previewSource.trim() ? (
               <MarkdownRenderer content={previewSource} sourceId={resourceId} direction={direction} />
             ) : (

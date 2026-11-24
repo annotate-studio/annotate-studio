@@ -1,7 +1,21 @@
 'use client';
 
 import React from 'react';
-import { AlignLeft, ClipboardList, Clock, GitCompare, HelpCircle, ListChecks, Network, Scale } from 'lucide-react';
+import {
+  AlertTriangle,
+  AlignLeft,
+  ClipboardList,
+  Clock,
+  Combine,
+  Dumbbell,
+  GitCompare,
+  GraduationCap,
+  HelpCircle,
+  Lightbulb,
+  ListChecks,
+  Network,
+  Scale,
+} from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import { PROMPT_PRESETS, type PromptId } from '@/lib/promptPresets';
 
@@ -14,6 +28,11 @@ const ICONS: Record<PromptId, React.ComponentType<{ size?: number; strokeWidth?:
   'why-how': HelpCircle,
   'cheat-sheet': ClipboardList,
   contradictions: Scale,
+  feynman: GraduationCap,
+  analogy: Lightbulb,
+  'exam-traps': AlertTriangle,
+  practice: Dumbbell,
+  synthesize: Combine,
 };
 
 interface PromptsDialogProps {

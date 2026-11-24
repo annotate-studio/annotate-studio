@@ -272,7 +272,7 @@ export default function FlashcardsTab() {
 
   if (review) {
     return (
-      <div className="page page-narrow">
+      <div className="page page-narrow page-review">
         <ReviewSession cardIds={review.ids} title={review.title} practice={review.practice} onExit={() => setReview(null)} />
       </div>
     );

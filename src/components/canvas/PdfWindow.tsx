@@ -39,6 +39,7 @@ import {
   MoveUpRight,
   Pen,
   PenLine,
+  Quote,
   Redo2,
   Square,
   Trash2,
@@ -50,6 +51,7 @@ import {
 import Popover from '@/components/ui/Popover';
 import ColorSwatches from '@/components/ui/ColorSwatches';
 import { getPdfEngine, type SharedPdfEngine } from '@/lib/pdf-engine';
+import { subscribePdfPageJump } from '@/lib/pdf-nav';
 import { isTauri, readFileBytes, writeFileBytes } from '@/lib/tauri-commands';
 import { registerFlusher } from '@/lib/persist';
 import { registerPdfSaver, trackPdfSave, waitForPdfSaves } from '@/lib/pdf-saves';
@@ -396,6 +398,18 @@ const PdfPageControls = memo(function PdfPageControls({ documentId, fallbackTota
   );
 });
 
+const PdfProgressBar = memo(function PdfProgressBar({ documentId, fallbackTotal }: { documentId: string; fallbackTotal: number }) {
+  const { state: scrollState } = useScroll(documentId);
+  const currentPage = scrollState?.currentPage ?? 1;
+  const totalPages = scrollState?.totalPages || fallbackTotal;
+  const pct = totalPages > 0 ? Math.min(100, Math.round((currentPage / totalPages) * 100)) : 0;
+  return (
+    <div className="reading-progress" title={`Page ${currentPage} of ${totalPages || '–'} (${pct}%)`}>
+      <div className="reading-progress-fill" style={{ width: `${pct}%` }} />
+    </div>
+  );
+});
+
 const PdfZoomControls = memo(function PdfZoomControls({ documentId }: { documentId: string }) {
   const { provides: zoom, state: zoomState } = useZoom(documentId);
   const zoomPercent = Math.round((zoomState?.currentZoomLevel ?? 1) * 100);
@@ -478,6 +492,13 @@ function PdfWorkspace({ documentId, resourceId, path, title, active }: Omit<PdfW
       if (event.documentId === documentId && event.result.outcome === 'uri') void openExternal(event.result.uri);
     });
   }, [annotationCapability, documentId]);
+
+  useEffect(() => {
+    if (!scroll) return;
+    return subscribePdfPageJump(path, (pageNumber) => {
+      scroll.scrollToPage({ pageNumber });
+    });
+  }, [scroll, path]);
 
   useEffect(() => {
     if (!history) return;
@@ -710,8 +731,19 @@ function PdfWorkspace({ documentId, resourceId, path, title, active }: Omit<PdfW
     };
   }, [zoom, maximized]);
 
-  const selectionActionsRef = useRef({ selectedText, clearSelection, markupSelection, sendToAi });
-  selectionActionsRef.current = { selectedText, clearSelection, markupSelection, sendToAi };
+  const copyCitation = useCallback(async () => {
+    const text = await selectedText();
+    if (!text) return;
+    const formatted = selection?.getFormattedSelection(documentId);
+    const pageNum = (formatted?.[0]?.pageIndex ?? 0) + 1;
+    const citation = `> ${text.replace(/\n+/g, ' ')}\n— [[${title}#p=${pageNum}]]`;
+    await copyText(citation);
+    clearSelection();
+    toast.success('Citation copied', `Page ${pageNum}`);
+  }, [selectedText, selection, documentId, title, clearSelection]);
+
+  const selectionActionsRef = useRef({ selectedText, clearSelection, markupSelection, sendToAi, copyCitation });
+  selectionActionsRef.current = { selectedText, clearSelection, markupSelection, sendToAi, copyCitation };
 
   const renderSelectionMenu = useCallback(
     ({ menuWrapperProps, placement }: { menuWrapperProps: React.HTMLAttributes<HTMLDivElement>; placement: { suggestTop?: boolean } }) => (
@@ -729,6 +761,9 @@ function PdfWorkspace({ documentId, resourceId, path, title, active }: Omit<PdfW
             title="Copy"
           >
             <Copy size={13} /> Copy
+          </button>
+          <button type="button" onClick={() => void selectionActionsRef.current.copyCitation()} title="Copy quote with clickable page link">
+            <Quote size={13} /> Cite
           </button>
           <button type="button" onClick={() => selectionActionsRef.current.markupSelection(PdfAnnotationSubtype.HIGHLIGHT)} title="Highlight">
             <Highlighter size={13} /> Highlight
@@ -886,6 +921,7 @@ function PdfWorkspace({ documentId, resourceId, path, title, active }: Omit<PdfW
           <Download size={14} />
         </button>
       </div>
+      <PdfProgressBar documentId={documentId} fallbackTotal={totalPages} />
       <div ref={viewportRef} className={cn('pdf-viewport', `pdf-tool-${tool}`)}>
         <Viewport documentId={documentId} className="pdf-viewport-inner">
           <Scroller documentId={documentId} renderPage={renderPage} />

@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ArrowLeft, Check, Loader2, RotateCcw, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, Check, Layers, Loader2, RotateCcw, Sparkles, X } from 'lucide-react';
 import MarkdownRenderer from '@/components/markdown/MarkdownRenderer';
 import { gradeExam, isAnswerCorrect, useExams, type Exam, type ExamQuestion } from '@/store/exams';
-import { useSettings } from '@/store/settings';
+import { useFlashcards, UNSORTED_ID } from '@/store/flashcards';
+import { createFlashcard } from '@/lib/tauri-commands';
 import { toast } from '@/store/toast';
 import { cn } from '@/lib/utils';
 import { gradeWrittenAnswer } from './examAi';
@@ -60,11 +61,31 @@ function WrittenGrading({ exam, question, externalBusy }: { exam: Exam; question
 export default function ExamResults({ exam, onBack, onRetake }: ExamResultsProps) {
   const gradeQuestion = useExams((state) => state.gradeQuestion);
   const [gradingAll, setGradingAll] = useState(false);
+  const [savedCards, setSavedCards] = useState<Record<string, boolean>>({});
   const { score, total, percentage } = gradeExam(exam.questions);
   const passed = percentage >= 60;
   const attempts = exam.attempts ?? [];
   const gradeableWritten = exam.questions.filter((q) => q.type === 'verbal' && q.userAnswer?.trim());
   const ungradedWritten = gradeableWritten.filter((q) => !q.verdict);
+
+  const saveQuestionAsCard = async (question: ExamQuestion) => {
+    if (savedCards[question.id]) return;
+    try {
+      const flashcards = useFlashcards.getState();
+      if (!flashcards.hydrated) await flashcards.hydrate();
+      const { activeCollectionId } = useFlashcards.getState();
+      const collectionId = activeCollectionId && activeCollectionId !== UNSORTED_ID ? activeCollectionId : undefined;
+      const back = question.explanation
+        ? `${question.correctAnswer}\n\n${question.explanation}`
+        : question.correctAnswer;
+      const card = await createFlashcard(question.question, back, exam.title, collectionId);
+      useFlashcards.getState().addCards([card]);
+      setSavedCards((prev) => ({ ...prev, [question.id]: true }));
+      toast.success('Saved as flashcard', 'Added to your flashcard deck');
+    } catch (error) {
+      toast.error('Could not save flashcard', error);
+    }
+  };
 
   const gradeAllWritten = async () => {
     const targets = ungradedWritten.length > 0 ? ungradedWritten : gradeableWritten;
@@ -164,7 +185,18 @@ export default function ExamResults({ exam, onBack, onRetake }: ExamResultsProps
             >
               <div className="review-item-head">
                 <span>Q{index + 1}</span>
-                <span className="review-item-status">{statusLabel}</span>
+                <div className="review-item-head-right">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => void saveQuestionAsCard(question)}
+                    title="Save this question as a flashcard"
+                  >
+                    {savedCards[question.id] ? <Check size={12} /> : <Layers size={12} />}
+                    {savedCards[question.id] ? 'Saved' : 'Flashcard'}
+                  </button>
+                  <span className="review-item-status">{statusLabel}</span>
+                </div>
               </div>
               <div className="content-selectable">
                 <MarkdownRenderer content={question.question} />

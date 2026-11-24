@@ -5,12 +5,14 @@ import {
   Copy,
   FileText,
   Image as ImageIcon,
+  Link2,
   Maximize2,
   Minimize2,
   Minus,
   NotebookPen,
   Pencil,
   ScanSearch,
+  StickyNote,
   Trash2,
   X,
 } from 'lucide-react';
@@ -30,6 +32,7 @@ import { toast } from '@/store/toast';
 import PdfWindow from './PdfWindow';
 import NoteWindow from './NoteWindow';
 import ImageWindow from './ImageWindow';
+import StickyWindow from './StickyWindow';
 import AiActionsButton from './AiActionsButton';
 
 type Handle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
@@ -39,6 +42,7 @@ const TYPE_ICONS: Record<Resource['type'], React.ReactNode> = {
   pdf: <FileText size={14} />,
   note: <NotebookPen size={14} />,
   image: <ImageIcon size={14} />,
+  sticky: <StickyNote size={14} />,
 };
 
 function currentZoom(): number {
@@ -62,6 +66,7 @@ const WindowBody = memo(function WindowBody({
   title: string;
   selected: boolean;
 }) {
+  if (type === 'sticky') return <StickyWindow resourceId={id} />;
   if (!filePath) {
     return <div className="cw-empty">This window has no file attached.</div>;
   }
@@ -72,6 +77,8 @@ const WindowBody = memo(function WindowBody({
 
 function CanvasWindow({ resource }: { resource: Resource }) {
   const selected = useCanvas((state) => state.selectedId === resource.id);
+  const dimmed = useCanvas((state) => state.spotlight && state.selectedId !== null && state.selectedId !== resource.id && !resource.maximized);
+  const connectFromId = useCanvas((state) => state.connectFromId);
   const maximizedView = useCanvas((state) => (resource.maximized ? activeWorkspace(state).view : null));
   const maximizedViewport = useCanvas((state) => (resource.maximized ? state.viewport : null));
   const frameRef = useRef<HTMLDivElement>(null);
@@ -79,6 +86,18 @@ function CanvasWindow({ resource }: { resource: Resource }) {
 
   const activate = useCallback(() => {
     const state = useCanvas.getState();
+    if (state.connectFromId && state.connectFromId !== resource.id) {
+      const fromId = state.connectFromId;
+      state.startConnect(null);
+      void promptDialog({
+        title: 'Label this connection (optional)',
+        placeholder: 'e.g. proves, contradicts, example of',
+        confirmLabel: 'Connect',
+      }).then((label) => {
+        if (label !== null) useCanvas.getState().addConnection(fromId, resource.id, label);
+      });
+      return;
+    }
     if (state.selectedId !== resource.id) state.select(resource.id);
     state.bringToFront(resource.id);
   }, [resource.id]);
@@ -206,6 +225,7 @@ function CanvasWindow({ resource }: { resource: Resource }) {
       },
       { label: 'Minimize', icon: <Minus size={13} />, onSelect: () => canvas.toggleMinimize(resource.id) },
       { label: 'Zoom to window', icon: <ScanSearch size={13} />, onSelect: () => canvas.fitToContent([resource.id]) },
+      { label: 'Connect to window…', icon: <Link2 size={13} />, onSelect: () => canvas.startConnect(resource.id) },
     ];
     if (resource.filePath) {
       items.push({
@@ -243,7 +263,11 @@ function CanvasWindow({ resource }: { resource: Resource }) {
       className={cn(
         'cw',
         `cw-${resource.type}`,
+        resource.type === 'sticky' && `sticky-${resource.stickyColor ?? 'yellow'}`,
         selected && 'cw-selected',
+        dimmed && 'cw-dimmed',
+        connectFromId === resource.id && 'cw-connect-source',
+        connectFromId && connectFromId !== resource.id && 'cw-connect-target',
         resource.maximized && 'cw-maximized',
         resource.minimized && 'cw-minimized',
         interaction && `cw-${interaction}`,

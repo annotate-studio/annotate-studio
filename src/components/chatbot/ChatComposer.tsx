@@ -1,7 +1,7 @@
 'use client';
 
 import React, { forwardRef, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { ArrowUp, BookOpenCheck, Bot, Brain, FileText, Paperclip, Square, Wand2, X } from 'lucide-react';
+import { ArrowUp, BookOpenCheck, Bot, Brain, FileText, GraduationCap, Image as ImageIcon, ImagePlus, Paperclip, ScanText, Square, Wand2, X } from 'lucide-react';
 import type { ChatEngine } from './useChatEngine';
 import PromptsDialog from './PromptsDialog';
 import { getPreset, type PromptId } from '@/lib/promptPresets';
@@ -42,7 +42,10 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
   const [highlight, setHighlight] = useState(0);
   const [deep, setDeep] = useState(false);
+  const [socratic, setSocratic] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const files = useLibrary((state) => state.files);
   const agentEnabled = useSettings((state) => state.agent.enabled);
   const updateAgent = useSettings((state) => state.updateAgent);
@@ -124,14 +127,23 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
 
   const submit = () => {
     const text = value.trim();
-    if (!text || engine.busy) return;
+    const hasEnabledImage = engine.attachments.some((a) => a.enabled && /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(a.path));
+    if ((!text && !hasEnabledImage) || engine.busy) return;
+    const finalText = text || 'Analyze and transcribe the attached image.';
     const prompt = enabledPrompt;
     setValue('');
     setMention(null);
     setEnabledPrompt(null);
     requestAnimationFrame(resize);
-    if (prompt) void engine.runPrompt(prompt, { text });
-    else void engine.send(text, { deep });
+    if (prompt) void engine.runPrompt(prompt, { text: finalText });
+    else void engine.send(finalText, { deep, socratic });
+  };
+
+  const attachPickedFiles = async (fileList: FileList | File[]) => {
+    const arr = Array.from(fileList);
+    if (arr.length === 0) return;
+    const saved = await importBrowserFiles(arr);
+    if (saved.length > 0) engine.addAttachments(saved);
   };
 
   const draft = value.trim();
@@ -175,6 +187,8 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
 
   const activePreset = enabledPrompt ? getPreset(enabledPrompt) : null;
   const activeAttachments = engine.attachments.filter((attachment) => attachment.enabled).length;
+  const hasOcrTarget = engine.attachments.some((a) => a.enabled && /\.(pdf|png|jpe?g|webp|gif|bmp|avif)$/i.test(a.path));
+  const hasEnabledImage = engine.attachments.some((a) => a.enabled && /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(a.path));
   const promptSource = activeAttachments
     ? `${activeAttachments} attached document${activeAttachments === 1 ? '' : 's'}${draft ? ' and your message' : ''}`
     : draft
@@ -189,7 +203,36 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
       : `Pick a prompt to enable it, then write your request and press Enter. It runs on ${promptSource}.`;
 
   return (
-    <div className="chat-composer">
+    <div
+      className={cn('chat-composer', dragOver && 'chat-composer-drag')}
+      onDragOver={(event) => {
+        if (event.dataTransfer?.types.includes('Files')) {
+          event.preventDefault();
+          setDragOver(true);
+        }
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(event) => {
+        setDragOver(false);
+        const dropped = Array.from(event.dataTransfer?.files ?? []);
+        if (dropped.length === 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void attachPickedFiles(dropped);
+      }}
+    >
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*,.pdf"
+        multiple
+        hidden
+        onChange={(event) => {
+          const picked = event.target.files;
+          if (picked && picked.length > 0) void attachPickedFiles(picked);
+          event.target.value = '';
+        }}
+      />
       {(engine.attachments.length > 0 || activePreset) && (
         <div className="chat-attachments">
           {activePreset && (
@@ -207,17 +250,31 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
               </button>
             </span>
           )}
-          {engine.attachments.map((attachment) => (
-            <span key={attachment.path} className={cn('attachment-chip', !attachment.enabled && 'attachment-chip-off')}>
-              <button type="button" onClick={() => engine.toggleAttachment(attachment.path)} title={attachment.enabled ? 'Included in the next message' : 'Not included'}>
-                <FileText size={12} />
-                <FileLabel path={attachment.name} />
-              </button>
-              <button type="button" onClick={() => engine.removeAttachment(attachment.path)} aria-label="Remove attachment">
-                <X size={11} />
-              </button>
-            </span>
-          ))}
+          {engine.attachments.map((attachment) => {
+            const isImg = /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(attachment.path);
+            return (
+              <span key={attachment.path} className={cn('attachment-chip', !attachment.enabled && 'attachment-chip-off')}>
+                <button type="button" onClick={() => engine.toggleAttachment(attachment.path)} title={attachment.enabled ? 'Included in the next message' : 'Not included'}>
+                  {isImg ? <ImageIcon size={12} /> : <FileText size={12} />}
+                  <FileLabel path={attachment.name} />
+                </button>
+                <button type="button" onClick={() => engine.removeAttachment(attachment.path)} aria-label="Remove attachment">
+                  <X size={11} />
+                </button>
+              </span>
+            );
+          })}
+          {hasOcrTarget && !engine.busy && (
+            <button
+              type="button"
+              className="prompt-chip ocr-quick-chip"
+              onClick={() => void engine.send('/ocr', { deep, socratic })}
+              title="Run OCR on attached images or PDFs and save as a note"
+            >
+              <ScanText size={12} />
+              <span>Run OCR</span>
+            </button>
+          )}
         </div>
       )}
       <div className="chat-input-row">
@@ -312,7 +369,16 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
           <button
             type="button"
             className="icon-btn"
-            title="Attach a document (@)"
+            title="Upload image or PDF for vision / OCR"
+            onClick={() => imageInputRef.current?.click()}
+            disabled={engine.busy}
+          >
+            <ImagePlus size={15} />
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            title="Attach a workspace document (@)"
             onClick={() => {
               const next = value.endsWith(' ') || !value ? `${value}@` : `${value} @`;
               setValue(next);
@@ -340,7 +406,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
               <Square size={13} />
             </button>
           ) : (
-            <button type="button" className="send-btn" onClick={submit} disabled={!value.trim()} title="Send (Enter)">
+            <button type="button" className="send-btn" onClick={submit} disabled={!value.trim() && !hasEnabledImage} title="Send (Enter)">
               <ArrowUp size={16} />
             </button>
           )}
@@ -362,6 +428,14 @@ const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function 
           title="Think deeper: use the reasoning model with extended thinking"
         >
           <Brain size={12} /> Think deeper
+        </button>
+        <button
+          type="button"
+          className={cn('chat-mode', socratic && 'chat-mode-on')}
+          onClick={() => setSocratic((current) => !current)}
+          title="Socratic tutor: guides you with hints and questions instead of giving the full answer immediately"
+        >
+          <GraduationCap size={12} /> Socratic
         </button>
       </div>
       <PromptsDialog open={promptsOpen} onClose={() => setPromptsOpen(false)} onPick={pickPrompt} hint={promptHint} />

@@ -9,6 +9,7 @@ import { useApp } from '@/store/app';
 import { usePomodoro } from '@/store/pomodoro';
 import { cn, formatDuration } from '@/lib/utils';
 import WorkspaceSwitcher from '@/components/canvas/WorkspaceSwitcher';
+import StudyPlanButton from '@/components/study/StudyPlanButton';
 
 async function currentWindow() {
   const { getCurrentWindow } = await import('@tauri-apps/api/window');
@@ -70,6 +71,7 @@ export default function TitleBar() {
       </div>
       <div className="titlebar-center" data-tauri-drag-region>
         <PomodoroChip />
+        <StudyPlanButton />
       </div>
       {desktop && (
         <div className="window-controls">
