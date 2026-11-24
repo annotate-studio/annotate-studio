@@ -1,167 +1,75 @@
 # Annotate Studio
 
-**Read. Annotate. Remember.**
+![Annotate Studio Screenshot](./docs/screenshot.png)
 
-Annotate Studio is a local-first learning application built around one idea: studying should happen in one place, with the tools you actually need.
+Read, annotate, and remember in one place.
 
-It combines reading, annotation, AI assistance, flashcards, exams, focused study sessions, and personal study support into a single workspace.
+Annotate Studio is a local-first desktop app for studying. Instead of jumping between a PDF reader, a note app, flashcard software, and AI chat windows, you can keep everything in one workspace.
 
-The application is built with **Tauri + Rust** and **Next.js**, with local AI at its core.
+Your files stay on your computer. You can run AI completely offline with Ollama, or connect your own API keys when you want cloud models.
 
-## Features
+## What you can do
 
-### Canvas
+### Study Canvas
+Put your PDFs, notes, and images side by side on an open canvas and organize them into separate workspaces for each class or topic. You can highlight and draw on PDFs, take notes next to them, and zoom in or out smoothly.
 
-Create a study canvas and bring your materials together.
+### Notes and Math
+Write in Markdown with LaTeX math, or edit full `.tex` files with a live preview and one-click PDF export. Equations, theorem blocks, callouts, and footnotes work out of the box, and every note keeps a lightweight revision history so you can see diffs and roll back whenever you want.
 
-* PDF documents
-* Markdown notes and LaTeX documents
-* Images
-* An AI assistant connected to your study materials
-* Explain concepts step by step
-* Ask questions directly about your materials
+### Persian and Right-to-Left Support
+Persian, Arabic, and mixed Persian-English text works naturally in both the editor and preview. Formulas and code stay left-to-right inside Persian sentences, and search matches Persian and Arabic letter forms together.
 
-The assistant can also help you:
+### AI Study Assistant
+Chat with your notes and PDFs, or let the assistant work across your workspace to search, organize, and draft material.
+- Summarize chapters, compare concepts, build timelines, create mind maps, or generate cheat sheets.
+- Turn scanned PDFs and images into editable notes with OCR.
+- Combine multiple files into a single structured study booklet.
+- Review any file edits with collapsible diffs and undo or revert prompts anytime.
+- Use a fast model for everyday tasks and a stronger model for hard questions or proofs.
 
-* Summarize
-* Extract key notes
-* Compare and contrast
-* Build timelines
-* Create mind maps
-* Answer "why" and "how" questions
-* Create cheat sheets
-* Find contradictions
+### Flashcards and Spaced Repetition
+Create flashcards by hand or generate them from your study material. Cards are scheduled with spaced repetition so tough topics come back sooner while familiar ones space out.
 
-Hold Ctrl and scroll over a note or PDF to make its text larger or smaller. This can be turned off in Settings.
+### Practice Exams
+Build or generate practice exams with both multiple-choice and written questions. Written answers can be checked and graded by AI with feedback.
 
-### Markdown and LaTeX
+### Focus and Support
+Includes a built-in Pomodoro timer for study sessions and a Motivation space where you can talk through exam stress, burnout, or study plans.
 
-Write notes in Markdown with LaTeX math, or work with complete LaTeX documents.
-
-* Equations with numbering and references (`\label`, `\eqref`), theorem, definition and proof blocks, callouts and footnotes
-* Your own LaTeX macros, command suggestions and a live preview of the formula you are typing
-* Adjustable formula size, and any formula opens enlarged with a double-click
-* `.tex` documents with a live preview and one-click compilation to PDF (requires TeX Live, MiKTeX or Tectonic)
-* Export of any note to LaTeX
-
-### Persian and right-to-left text
-
-Persian, Arabic and mixed Persian–English text is laid out correctly, line by line in the editor and paragraph by paragraph in the preview. Formulas, code and LaTeX commands stay left-to-right inside Persian sentences, lists and equation numbers use Persian digits, and search treats Persian and Arabic letter forms as the same.
-
-### AI agent
-
-The assistant can work as an agent over your whole workspace. It decides what to search and read, and it can create and edit notes, flashcards and exams. Every change it makes can be undone.
-
-* OCR of scanned PDFs and images with a vision model
-* Turning dozens of files into one structured study booklet
-* A routine model for everyday work and a reasoning model for proofs, papers and hard questions, with "Think deeper" and "Challenge"
-* Turning Lean proofs into natural-language proofs, paraphrasing papers and checking solutions step by step
-* A local search index and running summaries, so large libraries and long conversations keep their context
-
-### Flashcards
-
-Create flashcards manually or generate them with AI.
-
-Annotate Studio uses spaced repetition to help you review what you are learning. Difficult cards come back more often, while easier cards gradually require less attention.
-
-### Exams
-
-Create practice exams manually or generate them with AI.
-
-Both descriptive and multiple-choice questions are supported. AI can also help solve and evaluate your answers.
-
-### Pomodoro
-
-A built-in Pomodoro timer helps you structure study sessions with focused work periods and short or long breaks.
-
-### Motivation
-
-Studying is not always about productivity.
-
-The Motivation page gives you a space to talk with AI about exams, stress, sleep, anxiety, motivation, or simply whatever is on your mind.
-
-### AI Providers
-
-Annotate Studio is designed around flexible AI providers.
-
-You can use local AI through **Ollama**, or connect external providers such as **OpenAI**, **Gemini**, and other supported APIs.
-
-When you add a provider, Annotate Studio can fetch its models and detect which ones can read images, use tools or reason.
-
-Your learning workflow does not have to depend on a single provider.
-
-## Local-first
-
-Annotate Studio is designed to keep your learning environment under your control.
-
-The goal is to make the application useful with local models and local data, while still allowing cloud AI providers when you choose to use them.
+### Flexible AI and Privacy
+Connect local models through Ollama or add providers like OpenAI, Anthropic, and Gemini, with optional proxy support in Settings. AI is completely optional, and your data never leaves your machine unless you send a request to a cloud provider.
 
 ## Installation
 
-Pre-built application binaries are currently distributed through **GitHub Actions workflow artifacts**.
+Pre-built binaries are available in the **GitHub Actions** workflow artifacts. Download the latest build for your platform from the most recent successful run.
 
-Download the artifact from the latest successful workflow run.
-
-## Development
-
-Clone the repository:
+## Building from Source
 
 ```bash
 git clone --depth 1 https://github.com/annotate-studio/annotate-studio
 cd annotate-studio
-```
-
-Install dependencies:
-
-```bash
 npm install
-```
-
-Install the Tauri CLI:
-
-```bash
 cargo install tauri-cli
-```
-
-Run the application in development mode:
-
-```bash
 cargo tauri dev
 ```
 
-Build the application:
-
-```bash
-cargo tauri build
-```
+To build a release bundle, run `cargo tauri build`.
 
 ## Project Status
 
-Annotate Studio is an actively developed open-source project.
+Annotate Studio is an active open-source project. Much of the early codebase was built quickly with AI assistance, and we are steadily cleaning it up, improving performance, and making the architecture simpler and more reliable.
 
-The application is currently **heavily AI-engineered**. AI has been an important part of getting the project from idea to a working product, but that is not the end goal.
+## What's Next
 
-Over time, we want to continuously refactor the codebase, improve its architecture and maintainability, and optimize performance.
-
-The goal is simple: **use AI to build faster, then make the resulting software genuinely good.**
-
-## Next Steps
-
-Still evolving! Some of the things I want to explore next include:
-
-* Presentation creation, making it possible to turn study materials into structured presentations.
-* Document editing and export, including PPTX and DOCX formats compatible with Microsoft Office and Google Workspace.
-
-The long-term goal is not simply to add more AI features, but to build a learning environment where AI can genuinely understand, organize, and work with the material you are studying.
+- Turning study material into clean presentations
+- Exporting and editing Office-compatible documents like PPTX and DOCX
 
 ## Credit
 
-[I](https://github.com/tahadostifam) built Annotate Studio to bring together the study tools I personally needed in one place: spaced-repetition flashcards, exam practice, PDF annotation, a Pomodoro timer, and optional AI assistance. I decided to make it open source so that other students could benefit from it as well.
+Annotate Studio was started by [Taha Dostifam](https://github.com/tahadostifam) to bring all study tools together in one place without needing five different apps or handing notes over to the cloud.
 
-I also want to give my sincere thanks to [CluvexStudio](https://github.com/CluvexStudio) for the passionate work put into improving and testing Annotate Studio. His time, feedback, testing, and attention to detail have helped make the application better throughout its development. I genuinely appreciate the effort and care they have put into the project.
+Special thanks to [CluvexStudio](https://github.com/CluvexStudio) for all the testing, feedback, and care put into making Annotate Studio better.
 
-## Contribution
+## License and Contributing
 
-Annotate Studio is fully open source and distributed under a custom [license](https://github.com/annotate-studio/annotate-studio/blob/main/LICENSE).
-
-Issues and PRs are welcome. Contributions are reviewed before being accepted.
+Annotate Studio is open source under a custom [license](https://github.com/annotate-studio/annotate-studio/blob/main/LICENSE). Issues and pull requests are welcome.
