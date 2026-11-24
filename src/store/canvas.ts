@@ -2,8 +2,9 @@ import { create } from 'zustand';
 import { loadCanvasState, saveCanvasState } from '@/lib/tauri-commands';
 import { createSaver } from '@/lib/persist';
 import { clamp, uid } from '@/lib/utils';
+import { parseVisualization, type Visualization } from '@/lib/visualizations';
 
-export type ResourceType = 'pdf' | 'note' | 'image';
+export type ResourceType = 'pdf' | 'note' | 'image' | 'visual';
 
 export interface CanvasView {
   x: number;
@@ -17,6 +18,7 @@ export interface Resource {
   title: string;
   filePath?: string;
   content?: string;
+  visualization?: Visualization;
   x: number;
   y: number;
   width: number;
@@ -32,6 +34,7 @@ export interface Workspace {
   name: string;
   resources: Resource[];
   view: CanvasView;
+  filePaths: string[];
 }
 
 export interface Rect {
@@ -54,6 +57,7 @@ export const DEFAULT_SIZES: Record<ResourceType, { width: number; height: number
   pdf: { width: 760, height: 880 },
   note: { width: 680, height: 560 },
   image: { width: 560, height: 440 },
+  visual: { width: 640, height: 480 },
 };
 
 export interface OpenResourceInput {
@@ -61,6 +65,7 @@ export interface OpenResourceInput {
   title: string;
   filePath?: string;
   content?: string;
+  visualization?: Visualization;
   width?: number;
   height?: number;
 }
@@ -74,6 +79,7 @@ export interface OpenOptions {
 
 export interface CanvasStore {
   hydrated: boolean;
+  needsFileMigration: boolean;
   workspaces: Workspace[];
   activeWorkspaceId: string;
   selectedId: string | null;
@@ -86,6 +92,9 @@ export interface CanvasStore {
   createWorkspace: (name: string) => void;
   renameWorkspace: (id: string, name: string) => void;
   deleteWorkspace: (id: string) => void;
+  registerFileInWorkspace: (path: string, workspaceId?: string) => void;
+  removeFileFromWorkspace: (path: string, workspaceId?: string) => void;
+  seedWorkspaceFiles: (paths: string[]) => void;
   setView: (view: CanvasView) => void;
   panBy: (dx: number, dy: number) => void;
   zoomAt: (zoom: number, anchor?: { x: number; y: number }) => void;
@@ -117,7 +126,7 @@ export function activeWorkspace(state: Pick<CanvasStore, 'workspaces' | 'activeW
 }
 
 function newWorkspace(name: string, id: string = uid()): Workspace {
-  return { id, name, resources: [], view: { ...DEFAULT_VIEW } };
+  return { id, name, resources: [], view: { ...DEFAULT_VIEW }, filePaths: [] };
 }
 
 function finiteOr(value: unknown, fallback: number): number {
@@ -135,7 +144,7 @@ export function toWorkspaceRelative(path: string): string {
 }
 
 function isResourceType(value: unknown): value is ResourceType {
-  return value === 'pdf' || value === 'note' || value === 'image';
+  return value === 'pdf' || value === 'note' || value === 'image' || value === 'visual';
 }
 
 function migrateResource(raw: unknown, index: number): Resource | null {
@@ -154,12 +163,15 @@ function migrateResource(raw: unknown, index: number): Resource | null {
   const baseH = wasFullscreen && previous ? previous.height : data.height ?? size.height;
   const filePath = typeof data.filePath === 'string' && data.filePath.trim() ? toWorkspaceRelative(data.filePath.trim()) : undefined;
   const content = typeof data.content === 'string' ? data.content : undefined;
+  const visualization = type === 'visual' ? parseVisualization(data.visualization) ?? undefined : undefined;
+  if (type === 'visual' && !visualization) return null;
   return {
     id: typeof data.id === 'string' && data.id ? data.id : uid(),
     type,
     title: typeof data.title === 'string' && data.title.trim() ? data.title : 'Untitled',
     filePath,
     content: type === 'note' ? content : undefined,
+    visualization,
     x: finiteOr(baseX, 80 + index * 32),
     y: finiteOr(baseY, 80 + index * 32),
     width: Math.max(MIN_WINDOW_WIDTH, finiteOr(baseW, defaults.width)),
@@ -209,20 +221,43 @@ function migrateResources(rawList: unknown): Resource[] {
   return normalized.map((r) => (r.maximized && r.id !== topMaximized ? { ...r, maximized: false } : r));
 }
 
-export function migrateCanvasState(raw: unknown): { workspaces: Workspace[]; activeWorkspaceId: string } {
+function migrateFilePaths(raw: unknown, resources: Resource[]): { filePaths: string[]; hadField: boolean } {
+  const hadField = Array.isArray(raw);
+  const paths = new Set<string>();
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (typeof item === 'string' && item.trim()) paths.add(toWorkspaceRelative(item.trim()));
+    }
+  }
+  for (const r of resources) {
+    if (r.filePath) paths.add(r.filePath);
+  }
+  return { filePaths: Array.from(paths), hadField };
+}
+
+export function migrateCanvasState(raw: unknown): { workspaces: Workspace[]; activeWorkspaceId: string; needsFileMigration: boolean } {
   const data = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   let workspaces: Workspace[] = [];
+  let anyHadFilePaths = false;
   if (Array.isArray(data.workspaces)) {
     workspaces = data.workspaces
       .filter((w): w is Record<string, unknown> => !!w && typeof w === 'object')
-      .map((w, index) => ({
-        id: typeof w.id === 'string' && w.id ? w.id : uid(),
-        name: typeof w.name === 'string' && w.name.trim() ? w.name : `Workspace ${index + 1}`,
-        resources: migrateResources(w.resources),
-        view: migrateView(w.view ?? w.canvasView),
-      }));
+      .map((w, index) => {
+        const resources = migrateResources(w.resources);
+        const { filePaths, hadField } = migrateFilePaths(w.filePaths, resources);
+        if (hadField) anyHadFilePaths = true;
+        return {
+          id: typeof w.id === 'string' && w.id ? w.id : uid(),
+          name: typeof w.name === 'string' && w.name.trim() ? w.name : `Workspace ${index + 1}`,
+          resources,
+          view: migrateView(w.view ?? w.canvasView),
+          filePaths,
+        };
+      });
   } else if (Array.isArray(data.resources)) {
-    workspaces = [{ id: 'default', name: 'Default Workspace', resources: migrateResources(data.resources), view: migrateView(data.view) }];
+    const resources = migrateResources(data.resources);
+    const { filePaths } = migrateFilePaths(undefined, resources);
+    workspaces = [{ id: 'default', name: 'Default Workspace', resources, view: migrateView(data.view), filePaths }];
   }
   const unique = new Map<string, Workspace>();
   for (const workspace of workspaces) if (!unique.has(workspace.id)) unique.set(workspace.id, workspace);
@@ -230,7 +265,7 @@ export function migrateCanvasState(raw: unknown): { workspaces: Workspace[]; act
   if (workspaces.length === 0) workspaces = [newWorkspace('Default Workspace', 'default')];
   const requested = typeof data.activeWorkspaceId === 'string' ? data.activeWorkspaceId : '';
   const activeWorkspaceId = workspaces.some((w) => w.id === requested) ? requested : workspaces[0].id;
-  return { workspaces, activeWorkspaceId };
+  return { workspaces, activeWorkspaceId, needsFileMigration: !anyHadFilePaths };
 }
 
 function topZ(resources: Resource[]): number {
@@ -334,6 +369,7 @@ export const useCanvas = create<CanvasStore>((set, get) => {
 
   return {
     hydrated: false,
+    needsFileMigration: false,
     workspaces: [newWorkspace('Default Workspace', 'default')],
     activeWorkspaceId: 'default',
     selectedId: null,
@@ -383,6 +419,43 @@ export const useCanvas = create<CanvasStore>((set, get) => {
         selectedId: activeWorkspaceId === id ? null : get().selectedId,
         past: activeWorkspaceId === id ? [] : get().past,
         future: activeWorkspaceId === id ? [] : get().future,
+      });
+    },
+    registerFileInWorkspace: (path, workspaceId) => {
+      const normalized = toWorkspaceRelative(path);
+      if (!normalized) return;
+      const targetId = workspaceId ?? get().activeWorkspaceId;
+      set((state) => ({
+        workspaces: state.workspaces.map((w) =>
+          w.id === targetId && !w.filePaths.includes(normalized) ? { ...w, filePaths: [...w.filePaths, normalized] } : w,
+        ),
+      }));
+    },
+    removeFileFromWorkspace: (path, workspaceId) => {
+      const normalized = toWorkspaceRelative(path);
+      const targetId = workspaceId ?? get().activeWorkspaceId;
+      set((state) => ({
+        workspaces: state.workspaces.map((w) =>
+          w.id === targetId && w.filePaths.includes(normalized)
+            ? { ...w, filePaths: w.filePaths.filter((p) => p !== normalized) }
+            : w,
+        ),
+      }));
+    },
+    seedWorkspaceFiles: (paths) => {
+      if (!get().needsFileMigration) return;
+      const normalized = paths.map(toWorkspaceRelative).filter(Boolean);
+      set((state) => {
+        const claimed = new Set(state.workspaces.flatMap((w) => w.filePaths));
+        const unclaimed = normalized.filter((p) => !claimed.has(p));
+        return {
+          needsFileMigration: false,
+          workspaces: state.workspaces.map((w) =>
+            w.id === state.activeWorkspaceId
+              ? { ...w, filePaths: Array.from(new Set([...w.filePaths, ...unclaimed])) }
+              : w,
+          ),
+        };
       });
     },
 
@@ -503,6 +576,7 @@ export const useCanvas = create<CanvasStore>((set, get) => {
         title: input.title,
         filePath: input.filePath,
         content: input.content,
+        visualization: input.visualization,
         ...position,
         ...size,
         z: topZ(resources) + 1,
@@ -626,7 +700,9 @@ export const useCanvas = create<CanvasStore>((set, get) => {
       set((state) => ({
         workspaces: state.workspaces.map((w) => {
           const resources = rename(w.resources);
-          return resources === w.resources ? w : { ...w, resources };
+          const hasPath = w.filePaths.includes(oldPath);
+          const filePaths = hasPath ? Array.from(new Set(w.filePaths.map((p) => (p === oldPath ? newPath : p)))) : w.filePaths;
+          return resources === w.resources && !hasPath ? w : { ...w, resources, filePaths };
         }),
         past: state.past.map(rename),
         future: state.future.map(rename),
@@ -634,9 +710,16 @@ export const useCanvas = create<CanvasStore>((set, get) => {
     },
     closeByFilePath: (path) => {
       set((state) => {
-        const workspaces = state.workspaces.map((w) =>
-          w.resources.some((r) => r.filePath === path) ? { ...w, resources: w.resources.filter((r) => r.filePath !== path) } : w,
-        );
+        const workspaces = state.workspaces.map((w) => {
+          const hasRes = w.resources.some((r) => r.filePath === path);
+          const hasPath = w.filePaths.includes(path);
+          if (!hasRes && !hasPath) return w;
+          return {
+            ...w,
+            resources: hasRes ? w.resources.filter((r) => r.filePath !== path) : w.resources,
+            filePaths: hasPath ? w.filePaths.filter((p) => p !== path) : w.filePaths,
+          };
+        });
         const selectedExists = activeWorkspace({ workspaces, activeWorkspaceId: state.activeWorkspaceId }).resources.some(
           (r) => r.id === state.selectedId,
         );

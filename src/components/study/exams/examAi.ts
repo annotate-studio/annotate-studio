@@ -1,6 +1,7 @@
 import { aiChat } from '@/lib/tauri-commands';
 import { extractJson, extractJsonObjects } from '@/lib/ai';
 import { resolveAnswer, stripLetterPrefixes } from '@/lib/answers';
+import { ensureProviders, modelFor } from '@/lib/agent/models';
 import { uid } from '@/lib/utils';
 import type { Exam, ExamQuestion } from '@/store/exams';
 
@@ -105,25 +106,81 @@ Rules:
   };
 }
 
-export async function gradeWrittenAnswer(question: ExamQuestion, model?: string): Promise<{ verdict: 'correct' | 'incorrect'; feedback: string }> {
+export interface WrittenGradeResult {
+  verdict: 'correct' | 'partial' | 'incorrect';
+  score: number;
+  feedback: string;
+}
+
+function parseVerdict(raw: Record<string, unknown>, rawText: string): { verdict: 'correct' | 'partial' | 'incorrect'; score: number } | null {
+  const numeric = typeof raw.score === 'number' ? raw.score : typeof raw.score === 'string' ? Number(raw.score) : NaN;
+  const clampedScore = Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : null;
+
+  const v = raw.verdict ?? raw.result ?? raw.grade ?? raw.correct;
+  if (typeof v === 'boolean') {
+    return { verdict: v ? 'correct' : 'incorrect', score: clampedScore ?? (v ? 100 : 0) };
+  }
+  if (typeof v === 'string') {
+    const lower = v.trim().toLowerCase();
+    if (lower === 'correct' || lower === 'pass' || lower === 'passed' || lower === 'right' || lower === 'true' || lower === 'yes') {
+      return { verdict: 'correct', score: clampedScore ?? 100 };
+    }
+    if (lower.includes('partial')) {
+      return { verdict: 'partial', score: clampedScore ?? 50 };
+    }
+    if (lower === 'incorrect' || lower === 'wrong' || lower === 'fail' || lower === 'failed' || lower === 'false' || lower === 'no') {
+      return { verdict: 'incorrect', score: clampedScore ?? 0 };
+    }
+  }
+  if (clampedScore !== null) {
+    const verdict = clampedScore >= 75 ? 'correct' : clampedScore >= 35 ? 'partial' : 'incorrect';
+    return { verdict, score: clampedScore };
+  }
+  const loweredText = rawText.toLowerCase();
+  if (/\bpartially\s+correct\b|\bpartial\s+credit\b/.test(loweredText)) return { verdict: 'partial', score: 50 };
+  if (/\bincorrect\b|\bwrong\b/.test(loweredText)) return { verdict: 'incorrect', score: 0 };
+  if (/\bcorrect\b/.test(loweredText)) return { verdict: 'correct', score: 100 };
+  return null;
+}
+
+export async function gradeWrittenAnswer(
+  question: ExamQuestion,
+  model?: string,
+): Promise<WrittenGradeResult> {
+  await ensureProviders();
+  const chosenModel = model || modelFor('reasoning')?.id || modelFor('assistant')?.id;
   const response = await aiChat(
     [
       {
         role: 'system',
-        content:
-          'You grade written exam answers fairly. Compare the student answer with the model answer. Accept answers that capture the key ideas even if worded differently or in another language. Reply with JSON only: {"verdict": "correct" | "incorrect", "feedback": string}. Feedback is two or three sentences in the language of the student answer.',
+        content: `You are a fair, thorough academic exam grader evaluating a descriptive student answer.
+Compare the student's answer against the question and model answer on conceptual accuracy, completeness, and reasoning.
+Accept equivalent wording, alternative valid proofs/explanations, or answers in another language.
+Reply with JSON only — no markdown fences or extra text:
+{"verdict": "correct" | "partial" | "incorrect", "score": 0-100, "feedback": string}
+Rules:
+- "correct": score >= 75, captures all core concepts accurately.
+- "partial": score 35-74, captures some key ideas but misses important details or has minor errors.
+- "incorrect": score < 35, fundamentally wrong or off-topic.
+- "feedback": 2-4 clear sentences in the language of the student's answer explaining what was right and what was missing or wrong.`,
       },
       {
         role: 'user',
-        content: `Question: ${question.question}\n\nModel answer: ${question.correctAnswer}\n\nStudent answer: ${question.userAnswer ?? ''}`,
+        content: `Question:\n${question.question}\n\nModel answer:\n${question.correctAnswer}${question.explanation ? `\n\nRubric / Explanation:\n${question.explanation}` : ''}\n\nStudent answer:\n${question.userAnswer ?? ''}`,
       },
     ],
-    { model, temperature: 0 },
+    { model: chosenModel, temperature: 0, maxTokens: 1024 },
   );
-  const parsed = extractJson<{ verdict?: unknown; feedback?: unknown }>(response.content);
-  const verdict = typeof parsed?.verdict === 'string' ? parsed.verdict.trim().toLowerCase() : '';
-  if (verdict !== 'correct' && verdict !== 'incorrect') {
-    throw new Error('The AI grader returned an unexpected response.');
+  const parsed = extractJson<Record<string, unknown>>(response.content) ?? extractJsonObjects(response.content)[0] ?? {};
+  const result = parseVerdict(parsed, response.content);
+  if (!result) {
+    throw new Error('The AI grader returned an unexpected response. Try again or pick another model.');
   }
-  return { verdict, feedback: typeof parsed?.feedback === 'string' ? parsed.feedback : '' };
+  const feedback =
+    typeof parsed.feedback === 'string' && parsed.feedback.trim()
+      ? parsed.feedback.trim()
+      : typeof parsed.explanation === 'string' && parsed.explanation.trim()
+        ? parsed.explanation.trim()
+        : response.content.replace(/```[\s\S]*?```/g, '').trim().slice(0, 600);
+  return { verdict: result.verdict, score: result.score, feedback };
 }

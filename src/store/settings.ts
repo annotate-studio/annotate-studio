@@ -42,14 +42,25 @@ export interface AgentSettings {
   deepEffort: ReasoningEffort;
 }
 
+export interface ProxySettings {
+  enabled: boolean;
+  url: string;
+  bypassLocal: boolean;
+}
+
 export interface PersistedSettings {
   theme: ThemeMode;
   primaryColor: string;
+  backgroundImage: string;
+  backgroundBlur: number;
+  backgroundOpacity: number;
   appScale: number;
   pomodoro: PomodoroSettings;
   selectedModel: string;
+  fastModel: string;
   reasoningModel: string;
   visionModel: string;
+  proxy: ProxySettings;
   agent: AgentSettings;
   sidebarExpanded: boolean;
   notificationsEnabled: boolean;
@@ -65,6 +76,9 @@ export interface PersistedSettings {
 export const DEFAULT_SETTINGS: PersistedSettings = {
   theme: 'white',
   primaryColor: '#2563EB',
+  backgroundImage: '',
+  backgroundBlur: 8,
+  backgroundOpacity: 82,
   appScale: 100,
   pomodoro: {
     focusMinutes: 25,
@@ -76,8 +90,14 @@ export const DEFAULT_SETTINGS: PersistedSettings = {
     sound: 'beep',
   },
   selectedModel: '',
+  fastModel: '',
   reasoningModel: '',
   visionModel: '',
+  proxy: {
+    enabled: false,
+    url: '',
+    bypassLocal: true,
+  },
   agent: { enabled: true, allowWrites: true, confirmEdits: false, maxSteps: 30, deepEffort: 'high' },
   sidebarExpanded: false,
   notificationsEnabled: true,
@@ -97,6 +117,7 @@ interface SettingsStore extends PersistedSettings {
   updatePomodoro: (patch: Partial<PomodoroSettings>) => void;
   updateChatLayout: (patch: Partial<ChatLayout>) => void;
   updateAgent: (patch: Partial<AgentSettings>) => void;
+  updateProxy: (patch: Partial<ProxySettings>) => void;
   setNoteDirection: (path: string, direction: 'auto' | 'rtl' | 'ltr') => void;
   moveNoteDirection: (oldPath: string, newPath: string) => void;
   touchRecent: (path: string) => void;
@@ -116,7 +137,9 @@ function readableTextColor(hex: string): string {
   return luminance > 0.45 ? '#0F172A' : '#FFFFFF';
 }
 
-export function applyAppearance(settings: Pick<PersistedSettings, 'theme' | 'primaryColor' | 'mathScale'>) {
+export function applyAppearance(
+  settings: Pick<PersistedSettings, 'theme' | 'primaryColor' | 'mathScale' | 'backgroundImage' | 'backgroundBlur' | 'backgroundOpacity'>,
+) {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   root.dataset.theme = settings.theme;
@@ -124,6 +147,18 @@ export function applyAppearance(settings: Pick<PersistedSettings, 'theme' | 'pri
   root.style.setProperty('--primary', settings.primaryColor);
   root.style.setProperty('--primary-text', readableTextColor(settings.primaryColor));
   root.style.setProperty('--math-scale', String(settings.mathScale / 100));
+  const hasBg = Boolean(settings.backgroundImage && settings.backgroundImage.trim());
+  if (hasBg) {
+    root.dataset.hasBg = 'true';
+    root.style.setProperty('--app-bg-image', `url("${settings.backgroundImage.replace(/"/g, '\\"')}")`);
+    root.style.setProperty('--app-bg-blur', `${settings.backgroundBlur}px`);
+    root.style.setProperty('--app-bg-surface-alpha', `${settings.backgroundOpacity}%`);
+  } else {
+    delete root.dataset.hasBg;
+    root.style.removeProperty('--app-bg-image');
+    root.style.removeProperty('--app-bg-blur');
+    root.style.removeProperty('--app-bg-surface-alpha');
+  }
 }
 
 let appliedScale = 100;
@@ -177,6 +212,9 @@ function sanitize(raw: unknown): PersistedSettings {
   return {
     theme: THEME_IDS.includes(data.theme as ThemeMode) ? (data.theme as ThemeMode) : defaults.theme,
     primaryColor: isHexColor(data.primaryColor) ? data.primaryColor : defaults.primaryColor,
+    backgroundImage: text(data.backgroundImage, defaults.backgroundImage),
+    backgroundBlur: number(data.backgroundBlur, defaults.backgroundBlur, 0, 32),
+    backgroundOpacity: number(data.backgroundOpacity, defaults.backgroundOpacity, 20, 98),
     appScale: number(data.appScale, defaults.appScale, 80, 200),
     pomodoro: {
       focusMinutes: number(pomodoroRaw.focusMinutes, defaults.pomodoro.focusMinutes, 1, 180),
@@ -188,8 +226,14 @@ function sanitize(raw: unknown): PersistedSettings {
       sound: POMODORO_SOUNDS.includes(soundCandidate as PomodoroSound) ? (soundCandidate as PomodoroSound) : defaults.pomodoro.sound,
     },
     selectedModel: text(data.selectedModel, defaults.selectedModel),
+    fastModel: text(data.fastModel, defaults.fastModel),
     reasoningModel: text(data.reasoningModel, defaults.reasoningModel),
     visionModel: text(data.visionModel, defaults.visionModel),
+    proxy: {
+      enabled: bool((data.proxy as Record<string, unknown> | undefined)?.enabled, defaults.proxy.enabled),
+      url: text((data.proxy as Record<string, unknown> | undefined)?.url, defaults.proxy.url),
+      bypassLocal: bool((data.proxy as Record<string, unknown> | undefined)?.bypassLocal, defaults.proxy.bypassLocal),
+    },
     agent: {
       enabled: bool(agentRaw.enabled, defaults.agent.enabled),
       allowWrites: bool(agentRaw.allowWrites, defaults.agent.allowWrites),
@@ -220,11 +264,16 @@ function snapshot(state: SettingsStore): PersistedSettings {
   return {
     theme: state.theme,
     primaryColor: state.primaryColor,
+    backgroundImage: state.backgroundImage,
+    backgroundBlur: state.backgroundBlur,
+    backgroundOpacity: state.backgroundOpacity,
     appScale: state.appScale,
     pomodoro: state.pomodoro,
     selectedModel: state.selectedModel,
+    fastModel: state.fastModel,
     reasoningModel: state.reasoningModel,
     visionModel: state.visionModel,
+    proxy: state.proxy,
     agent: state.agent,
     sidebarExpanded: state.sidebarExpanded,
     notificationsEnabled: state.notificationsEnabled,
@@ -260,12 +309,22 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   },
   update: (patch) => {
     set(patch);
-    if (patch.theme !== undefined || patch.primaryColor !== undefined || patch.mathScale !== undefined) applyAppearance(get());
+    if (
+      patch.theme !== undefined ||
+      patch.primaryColor !== undefined ||
+      patch.mathScale !== undefined ||
+      patch.backgroundImage !== undefined ||
+      patch.backgroundBlur !== undefined ||
+      patch.backgroundOpacity !== undefined
+    ) {
+      applyAppearance(get());
+    }
     if (patch.appScale !== undefined) void applyScale(get().appScale);
   },
   updatePomodoro: (patch) => set((state) => ({ pomodoro: { ...state.pomodoro, ...patch } })),
   updateChatLayout: (patch) => set((state) => ({ chatLayout: { ...state.chatLayout, ...patch } })),
   updateAgent: (patch) => set((state) => ({ agent: { ...state.agent, ...patch } })),
+  updateProxy: (patch) => set((state) => ({ proxy: { ...state.proxy, ...patch } })),
   setNoteDirection: (path, direction) =>
     set((state) => {
       const next = { ...state.noteDirections };

@@ -28,6 +28,8 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 zip = "2"
+zstd = "0.13"
+sha2 = "0.10"
 
 [profile.release]
 codegen-units = 1

@@ -2,6 +2,7 @@ import {
   aiTurn,
   compileLatex,
   createFlashcard,
+  recordFileRevision,
   searchWorkspace,
   type ContentPart,
   type ProviderInfo,
@@ -11,6 +12,7 @@ import {
 import { resolveAnswer, stripLetterPrefixes } from '@/lib/answers';
 import { markdownToLatex } from '@/lib/latex-convert';
 import { resolveWorkspaceImage } from '@/lib/images';
+import { parseVisualization } from '@/lib/visualizations';
 import { baseName, extensionOf, stripExtension, uid } from '@/lib/utils';
 import { createNewNote, LATEX_EXTENSIONS, openFileOnCanvas, renameFile } from '@/lib/workspace-actions';
 import { normalizeForSearch } from '@/lib/bidi';
@@ -60,12 +62,27 @@ export interface ToolUndo {
   previous: string | null;
 }
 
+export interface ToolDiff {
+  path: string;
+  before: string;
+  after: string;
+}
+
+const MAX_DIFF_CHARS = 80_000;
+
+function makeDiff(path: string, before: string, after: string): ToolDiff | undefined {
+  if (before === after) return undefined;
+  if (before.length + after.length > MAX_DIFF_CHARS * 2) return undefined;
+  return { path, before, after };
+}
+
 export interface ToolResult {
   text: string;
   images?: ContentPart[];
   summary: string;
   paths?: string[];
   undo?: ToolUndo;
+  diff?: ToolDiff;
   error?: boolean;
 }
 
@@ -379,7 +396,14 @@ const createNote: AgentTool = {
     }
     context.createdPaths.add(file.path);
     context.readPaths.add(file.path);
-    return { text: `Created ${file.path} (${content.length} characters).`, summary: file.name, paths: [file.path], undo: { path: file.path, previous: null } };
+    void recordFileRevision(file.path, 'agent', `Created ${file.name}`).catch(() => undefined);
+    return {
+      text: `Created ${file.path} (${content.length} characters).`,
+      summary: file.name,
+      paths: [file.path],
+      undo: { path: file.path, previous: null },
+      diff: makeDiff(file.path, '', content),
+    };
   },
 };
 
@@ -426,7 +450,14 @@ const appendToNote: AgentTool = {
       next = `${previous.replace(/\s+$/, '')}\n\n${addition.trim()}\n`;
     }
     await saveNote(file.path, next);
-    return { text: `Added ${addition.length} characters to ${file.path}.`, summary: file.name, paths: [file.path], undo: { path: file.path, previous } };
+    void recordFileRevision(file.path, 'agent', `Appended to ${file.name}`).catch(() => undefined);
+    return {
+      text: `Added ${addition.length} characters to ${file.path}.`,
+      summary: file.name,
+      paths: [file.path],
+      undo: { path: file.path, previous },
+      diff: makeDiff(file.path, previous, next),
+    };
   },
 };
 
@@ -462,7 +493,14 @@ const replaceInNote: AgentTool = {
     await guardWrite(context, `Edit ${file.name}?`, `${find.slice(0, 200)}\n→\n${str(args.replace).slice(0, 200)}`, !context.createdPaths.has(file.path));
     const next = args.all === true ? previous.split(find).join(str(args.replace)) : previous.replace(find, () => str(args.replace));
     await saveNote(file.path, next);
-    return { text: `Replaced ${args.all === true ? count : 1} occurrence(s) in ${file.path}.`, summary: file.name, paths: [file.path], undo: { path: file.path, previous } };
+    void recordFileRevision(file.path, 'agent', `Edited ${file.name}`).catch(() => undefined);
+    return {
+      text: `Replaced ${args.all === true ? count : 1} occurrence(s) in ${file.path}.`,
+      summary: file.name,
+      paths: [file.path],
+      undo: { path: file.path, previous },
+      diff: makeDiff(file.path, previous, next),
+    };
   },
 };
 
@@ -480,8 +518,16 @@ const writeNote: AgentTool = {
     if (!context.readPaths.has(file.path)) throw new Error(`Read ${file.path} with read_file before rewriting it.`);
     await guardWrite(context, `Rewrite ${file.name}?`, 'The whole note will be replaced. You can undo it from the chat.', !context.createdPaths.has(file.path));
     const previous = await loadNote(file.path);
-    await saveNote(file.path, str(args.content));
-    return { text: `Rewrote ${file.path}.`, summary: file.name, paths: [file.path], undo: { path: file.path, previous } };
+    const next = str(args.content);
+    await saveNote(file.path, next);
+    void recordFileRevision(file.path, 'agent', `Rewrote ${file.name}`).catch(() => undefined);
+    return {
+      text: `Rewrote ${file.path}.`,
+      summary: file.name,
+      paths: [file.path],
+      undo: { path: file.path, previous },
+      diff: makeDiff(file.path, previous, next),
+    };
   },
 };
 
@@ -815,6 +861,35 @@ const ocrTool: AgentTool = {
   },
 };
 
+const addCanvasVisual: AgentTool = {
+  write: true,
+  spec: {
+    name: 'add_canvas_visual',
+    description:
+      'Render a structured study visualization (timeline, mindmap, venn_diagram, cheat_sheet, bullet_list, qa_grid, fallacy_list) directly as an interactive card on the canvas.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Title for the canvas card.' },
+        visualization: {
+          type: 'object',
+          description: 'Visualization JSON payload with "visualization_type" (timeline | mindmap | venn_diagram | cheat_sheet | bullet_list | qa_grid | fallacy_list) and its fields.',
+        },
+      },
+      required: ['title', 'visualization'],
+    },
+  },
+  label: (args) => `Added “${str(args.title) || 'Visual'}” to canvas`,
+  run: async (args, context) => {
+    const viz = parseVisualization(args.visualization);
+    if (!viz) throw new Error('Invalid visualization payload. Include a valid "visualization_type" and required fields.');
+    const title = str(args.title).trim() || 'Study Visual';
+    useCanvas.getState().openResource({ type: 'visual', title, visualization: viz }, { near: context.near });
+    useApp.getState().setView('canvas');
+    return { text: `Pinned "${title}" (${viz.type}) to the canvas.`, summary: title };
+  },
+};
+
 export const AGENT_TOOLS: AgentTool[] = [
   listFiles,
   search,
@@ -829,6 +904,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   flashcards,
   exam,
   openFiles,
+  addCanvasVisual,
   exportNote,
   reasoner,
   booklet,

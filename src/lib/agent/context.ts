@@ -54,10 +54,10 @@ function dropRaw(message: TurnMessage): TurnMessage {
 export function fitMessages(messages: TurnMessage[], budget: number): { messages: TurnMessage[]; trimmed: boolean } {
   if (totalTokens(messages) <= budget) return { messages, trimmed: false };
   const toolIndexes = messages.map((m, index) => (m.role === 'tool' ? index : -1)).filter((index) => index >= 0);
-  const protectedFrom = toolIndexes.length > 4 ? toolIndexes[toolIndexes.length - 4] : Number.POSITIVE_INFINITY;
-  let next = messages.map((message, index) => (message.role === 'tool' && index < protectedFrom ? shortenToolResult(message, 700) : message));
+  const protectedFrom = toolIndexes.length > 2 ? toolIndexes[toolIndexes.length - 2] : Number.POSITIVE_INFINITY;
+  let next = messages.map((message, index) => (message.role === 'tool' && index < protectedFrom ? shortenToolResult(message, 450) : message));
   if (totalTokens(next) <= budget) return { messages: next, trimmed: true };
-  next = next.map((message) => (message.role === 'tool' ? shortenToolResult(message, 2500) : message));
+  next = next.map((message) => (message.role === 'tool' ? shortenToolResult(message, 1800) : message));
   if (totalTokens(next) <= budget) return { messages: next, trimmed: true };
   const system = next.filter((m) => m.role === 'system');
   const rest = next.filter((m) => m.role !== 'system');

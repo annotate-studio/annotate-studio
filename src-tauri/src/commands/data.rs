@@ -40,6 +40,8 @@ pub fn save_settings(state: State<'_, AppState>, settings: Value) -> Result<(), 
     if !settings.is_object() {
         return Err("Settings must be an object".into());
     }
+    crate::proxy::update_from_settings(&settings);
+    state.refresh_http_clients();
     write_json(&state.paths.settings, &settings)
 }
 

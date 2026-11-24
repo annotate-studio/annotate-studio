@@ -31,74 +31,74 @@ export const PROMPT_PRESETS: PromptPreset[] = [
   {
     id: 'summary',
     label: 'Summary',
-    description: 'A short paragraph with the core argument and main points.',
+    description: 'Core thesis, key mechanisms, and essential takeaways in one crisp synthesis.',
     visualization: 'text',
-    temperature: 0.3,
+    temperature: 0.25,
     instruction:
-      'Summarize the provided text. Return a concise paragraph (max 150 words) capturing the core argument and main supporting points. Exclude minor examples and tangential details. Respond with {"visualization_type":"text","content":"String containing the summary."}',
+      'Synthesize the provided material into a high-density executive summary (120-180 words). Capture the central thesis, the key reasoning or mechanism, and the main conclusion or implication. Omit filler. Respond with {"visualization_type":"text","content":"String containing the summary."}',
   },
   {
     id: 'key-notes',
     label: 'Extract key notes',
-    description: 'The essential facts, definitions and conclusions as a flat list.',
+    description: 'High-yield facts, definitions, formulas, and conceptual takeaways.',
     visualization: 'bullet_list',
-    temperature: 0.3,
+    temperature: 0.25,
     instruction:
-      'Extract the most critical information from the text. Return only the essential facts, definitions, and conclusions. Organize as a flat list of key points. Each point must be a complete, standalone sentence. Max 10 points. Respond with {"visualization_type":"bullet_list","title":"Key Notes","items":["Point 1 sentence.","Point 2 sentence."]}.',
+      'Extract the highest-yield concepts a student must master from the text: core definitions, laws, causal relationships, and conclusions. Return 6-12 self-contained, exam-ready sentences in logical order. Respond with {"visualization_type":"bullet_list","title":"Key Notes","items":["Point 1 sentence.","Point 2 sentence."]}.',
   },
   {
     id: 'compare',
     label: 'Compare and contrast',
-    description: 'Two subjects with unique and shared attributes, as a Venn diagram.',
+    description: 'Deep conceptual comparison of two subjects as a Venn diagram.',
     visualization: 'venn_diagram',
-    temperature: 0.4,
+    temperature: 0.35,
     instruction:
-      'Identify the two primary subjects being compared in the text. Extract their unique attributes and their shared attributes. Do not add preamble or explanations. Ensure at least 3 items per category when possible. Respond with {"visualization_type":"venn_diagram","subjectA":"Subject Name","subjectB":"Contrasting Subject Name","uniqueA":["Unique attribute 1."],"uniqueB":["Unique attribute 1."],"overlap":["Shared attribute 1."]}.',
+      'Identify the two primary concepts, theories, or subjects compared in the text. Extract their sharpest distinguishing characteristics (uniqueA, uniqueB) and genuine shared principles (overlap). Aim for 4-5 substantive items per category. Respond with {"visualization_type":"venn_diagram","subjectA":"Subject Name","subjectB":"Contrasting Subject Name","uniqueA":["Unique attribute 1."],"uniqueB":["Unique attribute 1."],"overlap":["Shared attribute 1."]}.',
   },
   {
     id: 'timeline',
     label: 'Build a timeline',
-    description: 'Chronological events, oldest to newest, each with a date marker.',
+    description: 'Chronological events or process stages, ordered with dates and significance.',
     visualization: 'timeline',
-    temperature: 0.3,
+    temperature: 0.25,
     instruction:
-      'Extract all chronological events from the text. Sort them from oldest to newest. Each event must have a specific date or relative time marker. If exact dates are unavailable, use "circa [year]" or "Early [period]". Respond with {"visualization_type":"timeline","events":[{"date":"1945","title":"Event Title","description":"Brief description."}]}.',
+      'Extract all chronological events, historical milestones, or sequential process stages from the text, sorted from earliest to latest. Each item must include a crisp date or stage marker, a concise title, and a 1-2 sentence explanation of its cause or significance. Respond with {"visualization_type":"timeline","events":[{"date":"1945","title":"Event Title","description":"Brief significance."}]}.',
   },
   {
     id: 'mindmap',
     label: 'Create a mind map',
-    description: 'A central topic with up to 4 branches and short sub-topics.',
+    description: 'Hierarchical concept map with central topic, main pillars, and sub-concepts.',
     visualization: 'mindmap',
-    temperature: 0.4,
+    temperature: 0.35,
     instruction:
-      'Organize the text into a hierarchical mind map. The central topic is the root. Create up to 4 main branches. Each branch can have up to 3 sub-branches. Keep node labels short (2-5 words). Respond with {"visualization_type":"mindmap","root":"Central Topic","branches":[{"name":"Branch 1","children":["Sub-topic 1.1","Sub-topic 1.2"]}]}.',
+      'Organize the material into a structured conceptual mind map for deep retention. Choose the core topic as root, 4-6 distinct major branches, and 3-5 crisp sub-topics (2-6 words each) per branch capturing mechanisms, examples, or sub-concepts. Respond with {"visualization_type":"mindmap","root":"Central Topic","branches":[{"name":"Branch 1","children":["Sub-topic 1.1","Sub-topic 1.2"]}]}.',
   },
   {
     id: 'why-how',
     label: '"Why" and "How" questions',
-    description: 'Three deep "Why" and three "How" reasoning questions.',
+    description: 'Deep Socratic "Why" (causal) and "How" (mechanistic) study questions.',
     visualization: 'qa_grid',
-    temperature: 0.5,
+    temperature: 0.45,
     instruction:
-      "Generate deep-reasoning questions based on the text. Generate 3 'Why' questions that probe causes, rationale, or underlying principles. Generate 3 'How' questions that probe processes, mechanisms, or step-by-step execution. Do not ask obvious or surface-level questions. Respond with {\"visualization_type\":\"qa_grid\",\"why_questions\":[\"Why does X occur?\"],\"how_questions\":[\"How does X function?\"]}.",
+      'Generate 4 deep "Why" questions probing underlying causes, assumptions, or trade-offs, and 4 deep "How" questions probing step-by-step mechanisms, derivations, or real-world application. Avoid surface-level recall questions. Respond with {"visualization_type":"qa_grid","why_questions":["Why does X occur?"],"how_questions":["How does X function?"]}.',
   },
   {
     id: 'cheat-sheet',
     label: 'Create a cheat sheet',
-    description: 'Core idea, key facts, terms and one practical example.',
+    description: 'Exam-ready reference: core law, key facts, glossary, and worked example.',
     visualization: 'cheat_sheet',
-    temperature: 0.3,
+    temperature: 0.25,
     instruction:
-      'Condense the text into a single-page reference. Extract: 1) Core formula/definition, 2) 5-7 bullet point facts, 3) 3 key terms with definitions, 4) 1 practical example or application. Respond with {"visualization_type":"cheat_sheet","title":"Topic Name","core":"The single most important formula, law, or definition.","facts":["Fact 1."],"terms":[{"term":"Term 1","definition":"Definition."}],"example":"Brief practical application or example."}.',
+      'Distill the material into a high-yield exam cheat sheet: 1) Core principle, law, or definition, 2) 6-8 essential facts/rules, 3) 4-6 key terms with crisp definitions, 4) 1 concrete worked example or practical application. Respond with {"visualization_type":"cheat_sheet","title":"Topic Name","core":"The single most important principle or definition.","facts":["Fact 1."],"terms":[{"term":"Term 1","definition":"Definition."}],"example":"Concrete worked example or application."}.',
   },
   {
     id: 'contradictions',
     label: 'Find contradictions',
-    description: 'Logical fallacies and unsupported claims, with explanations.',
+    description: 'Critical audit of hidden assumptions, logical fallacies, and weak claims.',
     visualization: 'fallacy_list',
-    temperature: 0.4,
+    temperature: 0.35,
     instruction:
-      'Analyze the text for logical inconsistencies, unsupported claims, or contradictions. Identify up to 5 weaknesses. For each, state the claim being made, identify the logical fallacy type (e.g., Ad Hominem, Straw Man, False Dilemma, Hasty Generalization, Circular Reasoning), and explain why it is flawed. If no contradictions exist, return an empty array. Respond with {"visualization_type":"fallacy_list","fallacies":[{"claim":"The original claim or argument made in the text.","fallacy_type":"Ad Hominem","explanation":"Why this is a logical error."}]}.',
+      'Critically audit the material for logical inconsistencies, hidden assumptions, unsupported leaps, or contradictions. Identify up to 5 concrete weaknesses with the exact claim, fallacy/flaw category, and a clear explanation. If the reasoning is fully sound, return an empty array. Respond with {"visualization_type":"fallacy_list","fallacies":[{"claim":"The claim made in the text.","fallacy_type":"Hidden Assumption","explanation":"Why this is flawed."}]}.',
   },
 ];
 

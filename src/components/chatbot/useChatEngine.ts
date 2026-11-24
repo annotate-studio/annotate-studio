@@ -119,7 +119,7 @@ export function useChatEngine() {
     };
   }, []);
 
-  const model = () => useSettings.getState().selectedModel || undefined;
+  const model = () => modelFor('fast')?.id || useSettings.getState().selectedModel || undefined;
 
   const markStopped = (request: InflightRequest) => {
     if (request.messageId) {
@@ -267,7 +267,16 @@ export function useChatEngine() {
         schedule();
       },
       step: (step: AgentStep) => {
-        const entry: ChatStep = { id: step.id, tool: step.tool, label: step.label, status: step.status, summary: step.summary, paths: step.paths, undoable: Boolean(step.undo) };
+        const entry: ChatStep = {
+          id: step.id,
+          tool: step.tool,
+          label: step.label,
+          status: step.status,
+          summary: step.summary,
+          paths: step.paths,
+          undoable: Boolean(step.undo),
+          diff: step.diff,
+        };
         if (step.undo) rememberUndo(step.id, step.undo);
         const index = steps.findIndex((existing) => existing.id === step.id);
         steps = index >= 0 ? steps.map((existing, i) => (i === index ? entry : existing)) : [...steps, entry];
@@ -303,10 +312,11 @@ export function useChatEngine() {
       const request = inflight.current!;
       await ensureProviders();
       const settings = useSettings.getState();
+      const fast = modelFor('fast');
       const routine = modelFor('assistant');
       const reasoner = modelFor('reasoning');
       const vision = modelFor('vision');
-      const provider = deep ? reasoner ?? routine : routine;
+      const provider = deep ? reasoner ?? routine ?? fast : routine ?? fast;
       const messageId = useChatSessions.getState().appendMessage(sessionId, {
         role: 'assistant',
         content: '',
@@ -860,6 +870,40 @@ export function useChatEngine() {
     [lesson],
   );
 
+  const revertPrompt = useCallback(async (messageId: string): Promise<string | null> => {
+    const sessions = useChatSessions.getState();
+    const session = sessions.sessions.find((s) => s.messages.some((m) => m.id === messageId));
+    if (!session) return null;
+    const target = session.messages.find((m) => m.id === messageId && m.role === 'user');
+    if (!target) return null;
+
+    if (inflight.current) cancel();
+
+    const removed = sessions.truncateFrom(session.id, messageId);
+    const stepIdsToUndo: string[] = [];
+    for (const msg of removed) {
+      if (msg.role !== 'assistant' || !msg.steps) continue;
+      for (const step of msg.steps) {
+        if (!step.undone && hasUndo(step.id)) stepIdsToUndo.push(step.id);
+      }
+    }
+    let revertedFiles = 0;
+    for (const stepId of stepIdsToUndo.reverse()) {
+      const undo = takeUndo(stepId);
+      if (!undo) continue;
+      try {
+        await revertUndo(undo);
+        revertedFiles += 1;
+      } catch {
+        // continue reverting remaining files
+      }
+    }
+    if (revertedFiles > 0) {
+      toast.info('Prompt reverted', `Also reverted ${revertedFiles} file change${revertedFiles === 1 ? '' : 's'}.`);
+    }
+    return target.content;
+  }, [cancel]);
+
   const isBusy = useCallback(() => inflight.current !== null, []);
 
   return {
@@ -871,6 +915,7 @@ export function useChatEngine() {
     setLesson,
     send,
     retry,
+    revertPrompt,
     cancel,
     summarize,
     explain,

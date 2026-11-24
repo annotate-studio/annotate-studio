@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bot,
   Brain,
@@ -12,6 +12,8 @@ import {
   Database,
   Download,
   Eye,
+  Globe,
+  Image as ImageIcon,
   Keyboard,
   ListFilter,
   Loader2,
@@ -20,12 +22,17 @@ import {
   PlugZap,
   RefreshCw,
   Sigma,
+  Sparkles,
   Trash2,
   Upload,
   Wifi,
   WifiOff,
   Wrench,
+  X,
+  Zap,
 } from 'lucide-react';
+import Checkbox from '@/components/ui/Checkbox';
+import { compressBackgroundImage, extractPrimaryColor } from '@/lib/color-extract';
 import {
   addAIProvider,
   checkOllama,
@@ -158,10 +165,15 @@ function CapabilityEditor({ provider, onChange }: { provider: ProviderInfo; onCh
   return (
     <span className="cap-editor">
       {(['vision', 'tools', 'reasoning'] as const).map((key) => (
-        <label key={key} className="cap-toggle" title={`Mark ${provider.model} as ${provider.capabilities[key] ? 'not ' : ''}supporting ${key}`}>
-          <input type="checkbox" checked={provider.capabilities[key] === true} onChange={() => void toggle(key)} />
-          {key}
-        </label>
+        <Checkbox
+          key={key}
+          size="sm"
+          className="cap-toggle"
+          checked={provider.capabilities[key] === true}
+          onChange={() => void toggle(key)}
+          label={key}
+          title={`Mark ${provider.model} as ${provider.capabilities[key] ? 'not ' : ''}supporting ${key}`}
+        />
       ))}
     </span>
   );
@@ -276,21 +288,30 @@ function ProvidersPane() {
     return catalog.filter((entry) => !query || normalizeForSearch(`${entry.id} ${entry.name ?? ''}`).includes(query)).slice(0, 300);
   }, [catalog, filter]);
 
+  const proxy = useSettings((state) => state.proxy);
+  const updateProxy = useSettings((state) => state.updateProxy);
+
   return (
     <div className="settings-section">
-      <h2>AI providers</h2>
-      <p className="muted">AI features are optional. Your keys are stored only on this computer and requests go directly to the provider you choose.</p>
-
-      <div className={cn('status-row', ollama ? 'status-ok' : 'status-off')}>
-        {ollama === null ? <Loader2 size={14} className="spin" /> : ollama ? <Wifi size={14} /> : <WifiOff size={14} />}
-        {ollama === null ? 'Looking for Ollama…' : ollama ? 'Ollama is running on this computer' : 'Ollama was not found on localhost:11434'}
+      <div className="settings-hero">
+        <div>
+          <h2>AI providers</h2>
+          <p className="muted">Connect local Ollama models or cloud APIs. Keys stay encrypted on this machine and requests go directly to your chosen provider.</p>
+        </div>
+        <div className={cn('status-pill', ollama ? 'status-pill-ok' : 'status-pill-off')}>
+          {ollama === null ? <Loader2 size={13} className="spin" /> : ollama ? <Wifi size={13} /> : <WifiOff size={13} />}
+          <span>{ollama === null ? 'Checking Ollama…' : ollama ? 'Ollama online' : 'Ollama offline'}</span>
+        </div>
       </div>
 
       <div className="settings-card">
-        <h3>Your models</h3>
-        {providers.length === 0 ? (
-          <p className="muted">No providers yet — add one below.</p>
-        ) : (
+        <div className="settings-card-head">
+          <div>
+            <h3>Configured models</h3>
+            <p className="muted">{providers.length === 0 ? 'Add your first model below to unlock AI features.' : `${providers.length} model${providers.length === 1 ? '' : 's'} ready across ${new Set(providers.map((p) => p.type)).size} provider${new Set(providers.map((p) => p.type)).size === 1 ? '' : 's'}.`}</p>
+          </div>
+        </div>
+        {providers.length > 0 && (
           <div className="provider-list">
             {providers.map((provider) => (
               <div key={provider.id} className={cn('provider-row', provider.active && 'provider-row-active')}>
@@ -303,15 +324,17 @@ function ProvidersPane() {
                   {provider.active ? <CheckCircle2 size={17} /> : <Circle size={17} />}
                 </button>
                 <div className="provider-info">
-                  <strong>{provider.model}</strong>
+                  <div className="provider-title-line">
+                    <strong>{provider.model}</strong>
+                    {provider.active && <span className="badge tone-primary">Default</span>}
+                  </div>
                   <span>
                     {PROVIDER_LABELS[provider.type] ?? provider.type}
                     {provider.endpoint ? ` · ${provider.endpoint}` : ''}
-                    {provider.active ? ' · default' : ''}
                   </span>
                   {editing === provider.id ? <CapabilityEditor provider={provider} onChange={setProviders} /> : <CapabilityBadges capabilities={provider.capabilities ?? {}} />}
                 </div>
-                <button type="button" className={cn('icon-btn', editing === provider.id && 'tool-btn-active')} onClick={() => setEditing(editing === provider.id ? null : provider.id)} title="Correct what this model supports">
+                <button type="button" className={cn('icon-btn', editing === provider.id && 'tool-btn-active')} onClick={() => setEditing(editing === provider.id ? null : provider.id)} title="Edit model capabilities">
                   <ListFilter size={15} />
                 </button>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => void test(provider.id)} disabled={testing !== null}>
@@ -327,8 +350,8 @@ function ProvidersPane() {
       </div>
 
       <div className="settings-card">
-        <h3>Add models</h3>
-        <div className="chip-row">
+        <h3>Add provider &amp; models</h3>
+        <div className="provider-chip-grid">
           {PROVIDER_ORDER.map((id) => (
             <button
               key={id}
@@ -382,8 +405,8 @@ function ProvidersPane() {
               <div className="model-catalog-list">
                 {visible.map((entry) => (
                   <label key={entry.id} className={cn('model-option', picked.has(entry.id) && 'model-option-on')}>
-                    <input
-                      type="checkbox"
+                    <Checkbox
+                      size="sm"
                       checked={picked.has(entry.id)}
                       onChange={() =>
                         setPicked((current) => {
@@ -404,10 +427,12 @@ function ProvidersPane() {
               </div>
             </div>
           )}
-          <label className="checkbox-row field-wide">
-            <input type="checkbox" checked={makeDefault} onChange={(event) => setMakeDefault(event.target.checked)} />
-            Use as the default model
-          </label>
+          <Checkbox
+            className="field-wide"
+            checked={makeDefault}
+            onChange={setMakeDefault}
+            label="Use as the default model"
+          />
         </div>
         <div className="button-row">
           <button type="button" className="btn btn-primary" onClick={() => void save(false)} disabled={saving}>
@@ -416,6 +441,41 @@ function ProvidersPane() {
           <button type="button" className="btn btn-secondary" onClick={() => void save(true)} disabled={saving}>
             <PlugZap size={15} /> Save and test
           </button>
+        </div>
+      </div>
+
+      <div className="settings-card">
+        <div className="settings-card-head">
+          <div>
+            <h3>
+              <Globe size={15} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 6 }} />
+              Network proxy
+            </h3>
+            <p className="muted">Route outbound AI provider requests through an HTTP or HTTPS proxy server.</p>
+          </div>
+        </div>
+        <div className="form-grid">
+          <Checkbox
+            checked={proxy.enabled}
+            onChange={(enabled) => updateProxy({ enabled })}
+            label="Enable proxy for AI requests"
+          />
+          <label className="field field-wide">
+            <span className="field-label">Proxy URL</span>
+            <input
+              className="input mono"
+              value={proxy.url}
+              disabled={!proxy.enabled}
+              onChange={(event) => updateProxy({ url: event.target.value })}
+              placeholder="http://127.0.0.1:7890"
+            />
+          </label>
+          <Checkbox
+            checked={proxy.bypassLocal}
+            disabled={!proxy.enabled}
+            onChange={(bypassLocal) => updateProxy({ bypassLocal })}
+            label="Bypass proxy for local addresses (localhost, 127.0.0.1 — recommended for Ollama)"
+          />
         </div>
       </div>
     </div>
@@ -450,6 +510,7 @@ function AssistantPane() {
   const providers = useProviders((state) => state.providers);
   const refresh = useProviders((state) => state.refresh);
   const selectedModel = useSettings((state) => state.selectedModel);
+  const fastModel = useSettings((state) => state.fastModel);
   const reasoningModel = useSettings((state) => state.reasoningModel);
   const visionModel = useSettings((state) => state.visionModel);
   const agent = useSettings((state) => state.agent);
@@ -465,12 +526,13 @@ function AssistantPane() {
   return (
     <div className="settings-section">
       <h2>Assistant</h2>
-      <p className="muted">Give the assistant two brains: a fast routine model that manages files, notes and flashcards, and a stronger reasoning model for proofs, papers and deep questions.</p>
+      <p className="muted">Assign specialized models by workload: a lightweight model for fast editing and managing, a balanced model for everyday study, and a reasoning model for complex proofs and grading.</p>
       <div className="settings-card">
         <h3>Model roles</h3>
         <div className="form-grid">
-          <RoleSelect label="Routine model" hint="Default model" value={selectedModel} onChange={(value) => update({ selectedModel: value })} providers={providers} />
-          <RoleSelect label="Reasoning model" hint="Same as the routine model" value={reasoningModel} onChange={(value) => update({ reasoningModel: value })} providers={providers} require="reasoning" />
+          <RoleSelect label="Lightweight model (editing, summaries, managing)" hint="Same as the general assistant model" value={fastModel} onChange={(value) => update({ fastModel: value })} providers={providers} />
+          <RoleSelect label="General assistant model" hint="Default model" value={selectedModel} onChange={(value) => update({ selectedModel: value })} providers={providers} />
+          <RoleSelect label="Complex / reasoning model (proofs, deep mode, exam grading)" hint="Same as the general assistant model" value={reasoningModel} onChange={(value) => update({ reasoningModel: value })} providers={providers} require="reasoning" />
           <RoleSelect label="Vision model (OCR, images)" hint="Automatic: the first model that can read images" value={visionModel} onChange={(value) => update({ visionModel: value })} providers={providers} require="vision" />
         </div>
         {visionCapable.length === 0 && providers.length > 0 && (
@@ -479,19 +541,25 @@ function AssistantPane() {
       </div>
       <div className="settings-card">
         <h3>Agent</h3>
-        <label className="checkbox-row">
-          <input type="checkbox" checked={agent.enabled} onChange={(event) => updateAgent({ enabled: event.target.checked })} />
-          Let the assistant search, read and organize the whole workspace by itself
-        </label>
-        <label className="checkbox-row">
-          <input type="checkbox" checked={agent.allowWrites} onChange={(event) => updateAgent({ allowWrites: event.target.checked })} />
-          Allow it to create and edit notes, flashcards and exams
-        </label>
-        <label className="checkbox-row">
-          <input type="checkbox" checked={agent.confirmEdits} disabled={!agent.allowWrites} onChange={(event) => updateAgent({ confirmEdits: event.target.checked })} />
-          Ask me before it changes an existing note
-        </label>
-        <div className="form-grid form-grid-2">
+        <div className="form-grid">
+          <Checkbox
+            checked={agent.enabled}
+            onChange={(enabled) => updateAgent({ enabled })}
+            label="Let the assistant search, read and organize the active workspace by itself"
+          />
+          <Checkbox
+            checked={agent.allowWrites}
+            onChange={(allowWrites) => updateAgent({ allowWrites })}
+            label="Allow it to create and edit notes, flashcards, exams and canvas visuals"
+          />
+          <Checkbox
+            checked={agent.confirmEdits}
+            disabled={!agent.allowWrites}
+            onChange={(confirmEdits) => updateAgent({ confirmEdits })}
+            label="Ask me before it changes an existing note"
+          />
+        </div>
+        <div className="form-grid form-grid-2" style={{ marginTop: 12 }}>
           <label className="field">
             <span className="field-label">Maximum steps per request</span>
             <input className="input" type="number" min={4} max={120} value={agent.maxSteps} onChange={(event) => updateAgent({ maxSteps: Math.max(4, Math.min(120, Number(event.target.value) || 30)) })} />
@@ -674,10 +742,170 @@ function DataPane() {
   );
 }
 
-export default function SettingsTab() {
-  const [pane, setPane] = useState<Pane>('appearance');
+function AppearancePane() {
   const theme = useSettings((state) => state.theme);
   const primaryColor = useSettings((state) => state.primaryColor);
+  const backgroundImage = useSettings((state) => state.backgroundImage);
+  const backgroundBlur = useSettings((state) => state.backgroundBlur);
+  const backgroundOpacity = useSettings((state) => state.backgroundOpacity);
+  const update = useSettings((state) => state.update);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [extracting, setExtracting] = useState(false);
+
+  const onPickImage = async (file: File | undefined) => {
+    if (!file) return;
+    setExtracting(true);
+    try {
+      const dataUrl = await compressBackgroundImage(file);
+      const inferred = await extractPrimaryColor(dataUrl);
+      update({ backgroundImage: dataUrl, primaryColor: inferred });
+      toast.success('Background updated', `Primary color matched to ${inferred}`);
+    } catch (error) {
+      toast.error('Could not load background image', error);
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  const reExtract = async () => {
+    if (!backgroundImage) return;
+    setExtracting(true);
+    try {
+      const inferred = await extractPrimaryColor(backgroundImage);
+      update({ primaryColor: inferred });
+      toast.success('Accent color inferred', inferred);
+    } catch (error) {
+      toast.error('Could not analyze image', error);
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  return (
+    <div className="settings-section">
+      <div className="settings-hero">
+        <div>
+          <h2>Appearance</h2>
+          <p className="muted">Personalize your study studio with color themes, accents, or a custom backdrop that automatically harmonizes the interface.</p>
+        </div>
+      </div>
+
+      <div className="settings-card">
+        <h3>Color theme</h3>
+        <div className="theme-grid">
+          {THEME_IDS.map((id) => {
+            const preview = THEME_PREVIEW[id];
+            return (
+              <button key={id} type="button" className={cn('theme-tile', theme === id && 'theme-tile-active')} onClick={() => update({ theme: id })}>
+                <span className="theme-swatch" style={{ background: preview.bg }}>
+                  <span style={{ background: preview.card, color: preview.text }}>Aa</span>
+                </span>
+                <span>{preview.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="settings-card">
+        <div className="settings-card-head">
+          <div>
+            <h3>Background image</h3>
+            <p className="muted">Set an ambient background across the entire application. The primary accent color is inferred automatically from your image.</p>
+          </div>
+          {backgroundImage && (
+            <button type="button" className="btn btn-ghost btn-sm btn-danger-text" onClick={() => update({ backgroundImage: '' })}>
+              <X size={13} /> Clear
+            </button>
+          )}
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = '';
+            void onPickImage(file);
+          }}
+        />
+        <div className="bg-studio">
+          {backgroundImage ? (
+            <div className="bg-preview" style={{ backgroundImage: `url("${backgroundImage}")` }}>
+              <div className="bg-preview-overlay">
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()} disabled={extracting}>
+                  {extracting ? <Loader2 size={13} className="spin" /> : <ImageIcon size={13} />} Change image
+                </button>
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => void reExtract()} disabled={extracting}>
+                  <Sparkles size={13} /> Auto-match color
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" className="bg-dropzone" onClick={() => fileRef.current?.click()} disabled={extracting}>
+              {extracting ? <Loader2 size={20} className="spin" /> : <ImageIcon size={22} />}
+              <strong>Choose a background image</strong>
+              <span>PNG, JPG or WebP · primary accent color is extracted automatically</span>
+            </button>
+          )}
+
+          {backgroundImage && (
+            <div className="form-grid form-grid-2 bg-sliders">
+              <label className="field">
+                <span className="field-label">Backdrop blur ({backgroundBlur}px)</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={28}
+                  step={1}
+                  value={backgroundBlur}
+                  onChange={(event) => update({ backgroundBlur: Number(event.target.value) })}
+                  className="range"
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">Surface opacity ({backgroundOpacity}%)</span>
+                <input
+                  type="range"
+                  min={35}
+                  max={96}
+                  step={1}
+                  value={backgroundOpacity}
+                  onChange={(event) => update({ backgroundOpacity: Number(event.target.value) })}
+                  className="range"
+                />
+              </label>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="settings-card">
+        <h3>Accent color</h3>
+        <div className="accent-row">
+          {ACCENTS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              className={cn('accent-dot', primaryColor.toLowerCase() === color.toLowerCase() && 'accent-dot-active')}
+              style={{ background: color }}
+              onClick={() => update({ primaryColor: color })}
+              aria-label={`Accent ${color}`}
+            />
+          ))}
+          <label className="accent-custom" title="Custom color">
+            <input type="color" value={primaryColor} onChange={(event) => update({ primaryColor: event.target.value.toUpperCase() })} />
+            <span className="mono">{primaryColor}</span>
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function SettingsTab() {
+  const [pane, setPane] = useState<Pane>('appearance');
   const appScale = useSettings((state) => state.appScale);
   const notificationsEnabled = useSettings((state) => state.notificationsEnabled);
   const ctrlWheelZoom = useSettings((state) => state.ctrlWheelZoom);
@@ -702,46 +930,7 @@ export default function SettingsTab() {
         </div>
       </aside>
       <section className="page page-narrow">
-        {pane === 'appearance' && (
-          <div className="settings-section">
-            <h2>Appearance</h2>
-            <div className="settings-card">
-              <h3>Theme</h3>
-              <div className="theme-grid">
-                {THEME_IDS.map((id) => {
-                  const preview = THEME_PREVIEW[id];
-                  return (
-                    <button key={id} type="button" className={cn('theme-tile', theme === id && 'theme-tile-active')} onClick={() => update({ theme: id })}>
-                      <span className="theme-swatch" style={{ background: preview.bg }}>
-                        <span style={{ background: preview.card, color: preview.text }}>Aa</span>
-                      </span>
-                      <span>{preview.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="settings-card">
-              <h3>Accent color</h3>
-              <div className="accent-row">
-                {ACCENTS.map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    className={cn('accent-dot', primaryColor.toLowerCase() === color.toLowerCase() && 'accent-dot-active')}
-                    style={{ background: color }}
-                    onClick={() => update({ primaryColor: color })}
-                    aria-label={`Accent ${color}`}
-                  />
-                ))}
-                <label className="accent-custom" title="Custom color">
-                  <input type="color" value={primaryColor} onChange={(event) => update({ primaryColor: event.target.value.toUpperCase() })} />
-                  <span className="mono">{primaryColor}</span>
-                </label>
-              </div>
-            </div>
-          </div>
-        )}
+        {pane === 'appearance' && <AppearancePane />}
 
         {pane === 'interface' && (
           <div className="settings-section">
@@ -768,18 +957,20 @@ export default function SettingsTab() {
             </div>
             <div className="settings-card">
               <h3>Ctrl + mouse wheel zoom</h3>
-              <label className="checkbox-row">
-                <input type="checkbox" checked={ctrlWheelZoom} onChange={(event) => update({ ctrlWheelZoom: event.target.checked })} />
-                Hold Ctrl and scroll over a note or PDF to change its text size or zoom
-              </label>
+              <Checkbox
+                checked={ctrlWheelZoom}
+                onChange={(checked) => update({ ctrlWheelZoom: checked })}
+                label="Hold Ctrl and scroll over a note or PDF to change its text size or zoom"
+              />
               <p className="muted">When this is off, Ctrl + scroll always zooms the canvas. Ctrl + = and Ctrl + - also work in notes.</p>
             </div>
             <div className="settings-card">
               <h3>Notifications</h3>
-              <label className="checkbox-row">
-                <input type="checkbox" checked={notificationsEnabled} onChange={(event) => update({ notificationsEnabled: event.target.checked })} />
-                Notify me when a Pomodoro phase ends and when flashcards are due
-              </label>
+              <Checkbox
+                checked={notificationsEnabled}
+                onChange={(checked) => update({ notificationsEnabled: checked })}
+                label="Notify me when a Pomodoro phase ends and when flashcards are due"
+              />
             </div>
           </div>
         )}

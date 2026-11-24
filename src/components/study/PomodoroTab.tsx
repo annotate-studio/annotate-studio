@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Bell, Brain, Coffee, Flame, Pause, Play, RotateCcw, Settings, SkipForward, Volume2 } from 'lucide-react';
 import { phaseSeconds, today, usePomodoro, type PomodoroPhase } from '@/store/pomodoro';
+import Checkbox from '@/components/ui/Checkbox';
 import { POMODORO_SOUNDS, useSettings, type PomodoroSound } from '@/store/settings';
 import { getStudyStats, type StudyStats } from '@/lib/tauri-commands';
 import { playChime } from '@/lib/sound';
@@ -59,18 +60,25 @@ function TimerSettingsBody() {
         <NumberField label="Long break (min)" value={settings.longBreakMinutes} min={1} max={120} onChange={(v) => updatePomodoro({ longBreakMinutes: v })} />
         <NumberField label="Long break every" value={settings.longBreakEvery} min={2} max={12} onChange={(v) => updatePomodoro({ longBreakEvery: v })} />
       </div>
-      <label className="checkbox-row">
-        <input type="checkbox" checked={settings.autoStartBreaks} onChange={(event) => updatePomodoro({ autoStartBreaks: event.target.checked })} />
-        Start breaks automatically
-      </label>
-      <label className="checkbox-row">
-        <input type="checkbox" checked={settings.autoStartFocus} onChange={(event) => updatePomodoro({ autoStartFocus: event.target.checked })} />
-        Start the next focus session automatically
-      </label>
-      <label className="checkbox-row">
-        <input type="checkbox" checked={notificationsEnabled} onChange={(event) => update({ notificationsEnabled: event.target.checked })} />
-        <Bell size={14} /> Desktop notifications
-      </label>
+      <Checkbox
+        checked={settings.autoStartBreaks}
+        onChange={(checked) => updatePomodoro({ autoStartBreaks: checked })}
+        label="Start breaks automatically"
+      />
+      <Checkbox
+        checked={settings.autoStartFocus}
+        onChange={(checked) => updatePomodoro({ autoStartFocus: checked })}
+        label="Start the next focus session automatically"
+      />
+      <Checkbox
+        checked={notificationsEnabled}
+        onChange={(checked) => update({ notificationsEnabled: checked })}
+        label={
+          <>
+            <Bell size={14} /> Desktop notifications
+          </>
+        }
+      />
       <div className="field">
         <span className="field-label">
           <Volume2 size={13} /> Sound

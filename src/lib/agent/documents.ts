@@ -16,6 +16,7 @@ import { baseName, extensionOf, uid } from '@/lib/utils';
 import { IMAGE_EXTENSIONS } from '@/lib/workspace-actions';
 import { useLibrary } from '@/store/library';
 import { useNotes } from '@/store/notes';
+import { activeWorkspace, useCanvas } from '@/store/canvas';
 import { OCR_PROMPT } from './prompts';
 
 export interface PageText {
@@ -54,8 +55,12 @@ export function fileInfo(path: string): StudyFile | undefined {
 
 export async function libraryFiles(): Promise<StudyFile[]> {
   const library = useLibrary.getState();
-  if (library.loaded) return library.files;
-  return library.refresh();
+  const all = library.loaded ? library.files : await library.refresh();
+  const workspace = activeWorkspace(useCanvas.getState());
+  const allowed = new Set(workspace.filePaths);
+  for (const r of workspace.resources) if (r.filePath) allowed.add(r.filePath);
+  if (allowed.size === 0 && !useCanvas.getState().hydrated) return all;
+  return all.filter((file) => allowed.has(file.path));
 }
 
 export function resolvePath(input: string, files: StudyFile[]): StudyFile | undefined {

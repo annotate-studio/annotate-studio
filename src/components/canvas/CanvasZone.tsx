@@ -19,7 +19,6 @@ import {
   Unlock,
 } from 'lucide-react';
 import CanvasViewport from './CanvasViewport';
-import WorkspaceSwitcher from './WorkspaceSwitcher';
 import Popover from '@/components/ui/Popover';
 import { MenuList } from '@/components/ui/ContextMenu';
 import { useActiveWorkspace, useCanvas } from '@/store/canvas';
@@ -76,8 +75,6 @@ function CanvasToolbar() {
 
   return (
     <div className="canvas-toolbar">
-      <WorkspaceSwitcher />
-      <div className="toolbar-divider" />
       <button type="button" className="toolbar-btn" onClick={() => void pickAndImport('pdf')} title="Import PDF">
         <FilePlus2 size={14} />
         <span className="toolbar-label">PDF</span>

@@ -65,18 +65,33 @@ const TYPE_META: Record<FileType, { label: string; icon: React.ReactNode; tone: 
 };
 
 export default function LibraryTab() {
-  const files = useLibrary((state) => state.files);
+  const allFiles = useLibrary((state) => state.files);
   const loading = useLibrary((state) => state.loading);
   const refresh = useLibrary((state) => state.refresh);
   const recent = useSettings((state) => state.recentFiles);
-  const resources = useCanvas((state) => activeWorkspace(state).resources);
+  const workspace = useCanvas((state) => activeWorkspace(state));
+  const resources = workspace.resources;
   const openSet = useMemo(() => new Set(resources.map((r) => r.filePath).filter((p): p is string => Boolean(p))), [resources]);
+  const workspaceSet = useMemo(() => {
+    const set = new Set(workspace.filePaths);
+    for (const r of resources) if (r.filePath) set.add(r.filePath);
+    return set;
+  }, [workspace.filePaths, resources]);
+  const [scope, setScope] = useState<'workspace' | 'all'>('workspace');
+  const files = useMemo(
+    () => (scope === 'all' ? allFiles : allFiles.filter((file) => workspaceSet.has(file.path))),
+    [allFiles, scope, workspaceSet],
+  );
   const setView = useApp((state) => state.setView);
   const requestChat = useApp((state) => state.requestChat);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [sort, setSort] = useState<Sort>('recent');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setSelected(new Set());
+  }, [workspace.id, scope]);
 
   useEffect(() => {
     void refresh();
@@ -173,10 +188,18 @@ export default function LibraryTab() {
         <div>
           <h1>Library</h1>
           <p>
-            {files.length} file{files.length === 1 ? '' : 's'} in your workspace
+            {files.length} file{files.length === 1 ? '' : 's'} in {scope === 'workspace' ? workspace.name : 'all workspaces'}
           </p>
         </div>
         <div className="page-actions">
+          <div className="segmented">
+            <button type="button" className={cn(scope === 'workspace' && 'active')} onClick={() => setScope('workspace')}>
+              This workspace
+            </button>
+            <button type="button" className={cn(scope === 'all' && 'active')} onClick={() => setScope('all')}>
+              All files
+            </button>
+          </div>
           <button type="button" className="btn btn-ghost" onClick={() => void refresh()} title="Refresh">
             <RefreshCw size={15} className={loading ? 'spin' : undefined} />
           </button>

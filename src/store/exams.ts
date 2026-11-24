@@ -13,7 +13,8 @@ export interface ExamQuestion {
   correctAnswer: string;
   explanation?: string;
   userAnswer?: string;
-  verdict?: 'correct' | 'incorrect';
+  verdict?: 'correct' | 'partial' | 'incorrect';
+  aiScore?: number;
   feedback?: string;
 }
 
@@ -52,16 +53,27 @@ interface ExamStore {
   addExam: (exam: Exam) => void;
   updateExam: (id: string, patch: Partial<Exam>) => void;
   updateQuestion: (examId: string, questionId: string, patch: Partial<ExamQuestion>) => void;
-  gradeQuestion: (examId: string, questionId: string, patch: Pick<ExamQuestion, 'verdict' | 'feedback'>) => void;
+  gradeQuestion: (examId: string, questionId: string, patch: Pick<ExamQuestion, 'verdict' | 'feedback' | 'aiScore'>) => void;
   deleteExam: (id: string) => void;
 }
 
-export function isAnswerCorrect(question: ExamQuestion): boolean {
-  if (question.verdict) return question.verdict === 'correct';
+export function questionPoints(question: ExamQuestion): number {
+  if (question.verdict === 'correct') return 1;
+  if (question.verdict === 'incorrect') return 0;
+  if (question.verdict === 'partial') {
+    if (typeof question.aiScore === 'number' && Number.isFinite(question.aiScore)) {
+      return Math.max(0, Math.min(1, question.aiScore / 100));
+    }
+    return 0.5;
+  }
   const answer = question.userAnswer?.trim();
-  if (!answer) return false;
-  if (question.type === 'multiple-choice') return answer === question.correctAnswer.trim();
-  return normalizeAnswer(answer) === normalizeAnswer(question.correctAnswer);
+  if (!answer) return 0;
+  if (question.type === 'multiple-choice') return answer === question.correctAnswer.trim() ? 1 : 0;
+  return normalizeAnswer(answer) === normalizeAnswer(question.correctAnswer) ? 1 : 0;
+}
+
+export function isAnswerCorrect(question: ExamQuestion): boolean {
+  return questionPoints(question) >= 0.99;
 }
 
 function normalizeAnswer(value: string): string {
@@ -70,8 +82,9 @@ function normalizeAnswer(value: string): string {
 
 export function gradeExam(questions: ExamQuestion[]) {
   const total = questions.length;
-  const score = questions.filter(isAnswerCorrect).length;
-  return { score, total, percentage: total === 0 ? 0 : Math.round((score / total) * 100) };
+  const rawScore = questions.reduce((sum, q) => sum + questionPoints(q), 0);
+  const score = Math.round(rawScore * 10) / 10;
+  return { score, total, percentage: total === 0 ? 0 : Math.round((rawScore / total) * 100) };
 }
 
 export function blankQuestion(type: QuestionType): ExamQuestion {
@@ -97,7 +110,8 @@ function migrateQuestion(raw: unknown): ExamQuestion | null {
     correctAnswer: typeof data.correctAnswer === 'string' ? data.correctAnswer : '',
     explanation: typeof data.explanation === 'string' ? data.explanation : undefined,
     userAnswer: typeof data.userAnswer === 'string' ? data.userAnswer : undefined,
-    verdict: data.verdict === 'correct' || data.verdict === 'incorrect' ? data.verdict : undefined,
+    verdict: data.verdict === 'correct' || data.verdict === 'partial' || data.verdict === 'incorrect' ? data.verdict : undefined,
+    aiScore: typeof data.aiScore === 'number' && Number.isFinite(data.aiScore) ? data.aiScore : undefined,
     feedback: typeof data.feedback === 'string' ? data.feedback : undefined,
   };
 }

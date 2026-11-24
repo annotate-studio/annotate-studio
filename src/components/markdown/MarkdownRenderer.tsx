@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, memo, useContext, useEffect, useId, useMemo, useState } from 'react';
+import React, { createContext, memo, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import 'katex/dist/katex.min.css';
 import {
   AlertTriangle,
@@ -22,7 +22,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { inlineProse, isSafeUrl, parseMarkdown, type Block, type Inline } from '@/lib/markdown';
-import { analyzeDocument, CALLOUT_TITLES, CALLOUT_TONES, ENV_LABELS, resolveMathRefs, type DocumentModel } from '@/lib/latex';
+import { analyzeDocument, CALLOUT_TITLES, CALLOUT_TONES, ENV_LABELS, resolveMathRefs, type DocumentModel, type MacroMap } from '@/lib/latex';
 import { renderMath } from '@/lib/math-render';
 import {
   countLetters,
@@ -43,6 +43,7 @@ import { openWikiLink } from '@/lib/workspace-actions';
 import { useLibrary } from '@/store/library';
 import { useFormula } from '@/store/formula';
 import { useSettings } from '@/store/settings';
+import Checkbox from '@/components/ui/Checkbox';
 
 interface MarkdownRendererProps {
   content: string;
@@ -54,6 +55,7 @@ interface MarkdownRendererProps {
 
 interface RenderContext {
   model: DocumentModel;
+  macros: MacroMap;
   onWikiLink: (target: string) => void;
   persian: boolean;
 }
@@ -81,21 +83,23 @@ function localNumber(value: string, persian: boolean): string {
 
 const MathNode = memo(function MathNode({
   latex,
+  source,
   display,
   anchor,
+  macros,
   macrosKey,
 }: {
   latex: string;
+  source: string;
   display: boolean;
   anchor?: string | null;
+  macros: MacroMap;
   macrosKey: string;
 }) {
-  const { model } = useRenderContext();
-  const resolved = useMemo(() => resolveMathRefs(latex, model.labels), [latex, model.labels]);
-  const rendered = useMemo(() => renderMath(resolved, display, model.macros, macrosKey), [resolved, display, model.macros, macrosKey]);
+  const rendered = useMemo(() => renderMath(latex, display, macros, macrosKey), [latex, display, macros, macrosKey]);
   const openFormula = () =>
-    useFormula.getState().open({ latex: resolved, display: true, macros: model.macros, macrosKey, source: latex });
-  if (!rendered.html) return <code className="md-inline-code md-math-error" title={rendered.error ?? undefined}>{latex}</code>;
+    useFormula.getState().open({ latex, display: true, macros, macrosKey, source });
+  if (!rendered.html) return <code className="md-inline-code md-math-error" title={rendered.error ?? undefined}>{source}</code>;
   if (display) {
     return (
       <div className={cn('md-math', rendered.error && 'md-math-has-error')} dir="ltr" id={anchor ?? undefined} onDoubleClick={openFormula}>
@@ -117,7 +121,7 @@ const MathNode = memo(function MathNode({
   );
 });
 
-function CodeBlock({ lang, value }: { lang: string; value: string }) {
+const CodeBlock = memo(function CodeBlock({ lang, value }: { lang: string; value: string }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -138,7 +142,7 @@ function CodeBlock({ lang, value }: { lang: string; value: string }) {
       </pre>
     </div>
   );
-}
+});
 
 const MIME: Record<string, string> = {
   png: 'image/png',
@@ -287,9 +291,10 @@ function renderInline(nodes: Inline[], context: RenderContext): React.ReactNode[
         );
       case 'math': {
         const plan = context.model.inlineMath.get(node);
-        const latex = plan ? plan.latex : node.value;
-        if (!latex.trim()) return null;
-        return <MathNode key={index} latex={latex} display={node.display} macrosKey={context.model.macrosKey} />;
+        const source = plan ? plan.latex : node.value;
+        if (!source.trim()) return null;
+        const resolved = resolveMathRefs(source, context.model.labels);
+        return <MathNode key={index} latex={resolved} source={source} display={node.display} macros={context.macros} macrosKey={context.model.macrosKey} />;
       }
       case 'break':
         return <br key={index} />;
@@ -372,24 +377,37 @@ function inlineDirection(nodes: Inline[], persian = false): TextDirection | null
   return detected;
 }
 
+const directionCacheLtr = new WeakMap<Block, TextDirection | null>();
+const directionCacheRtl = new WeakMap<Block, TextDirection | null>();
+const proseCache = new WeakMap<Block, string>();
+
 function inherentDirection(block: Block, persian = false): TextDirection | null {
+  const cache = persian ? directionCacheRtl : directionCacheLtr;
+  if (cache.has(block)) return cache.get(block) ?? null;
+  let result: TextDirection | null = null;
   switch (block.type) {
     case 'heading':
     case 'paragraph':
-      return inlineDirection(block.children, persian);
+      result = inlineDirection(block.children, persian);
+      break;
     case 'list': {
       for (const item of block.items) {
         const direction = blocksDirection(item.children, persian);
-        if (direction) return direction;
+        if (direction) {
+          result = direction;
+          break;
+        }
       }
-      return null;
+      break;
     }
     case 'quote':
     case 'footnoteDef':
     case 'env':
-      return blocksDirection(block.children, persian) ?? (block.type === 'env' && block.title ? inlineDirection(block.title, persian) : null);
+      result = blocksDirection(block.children, persian) ?? (block.type === 'env' && block.title ? inlineDirection(block.title, persian) : null);
+      break;
     case 'callout':
-      return blocksDirection(block.children, persian) ?? inlineDirection(block.title, persian);
+      result = blocksDirection(block.children, persian) ?? inlineDirection(block.title, persian);
+      break;
     case 'table': {
       let rtl = 0;
       let ltr = 0;
@@ -400,12 +418,14 @@ function inherentDirection(block: Block, persian = false): TextDirection | null 
         ltr += counts.ltr;
       }
       const detected = directionFromCounts({ rtl, ltr });
-      if (detected === 'ltr' && persian && rtl > 0) return 'rtl';
-      return detected;
+      result = detected === 'ltr' && persian && rtl > 0 ? 'rtl' : detected;
+      break;
     }
     default:
-      return null;
+      result = null;
   }
+  cache.set(block, result);
+  return result;
 }
 
 function blocksDirection(blocks: Block[], persian = false): TextDirection | null {
@@ -416,25 +436,33 @@ function blocksDirection(blocks: Block[], persian = false): TextDirection | null
   return null;
 }
 
+function singleBlockText(block: Block): string {
+  const hit = proseCache.get(block);
+  if (hit !== undefined) return hit;
+  let result = '';
+  switch (block.type) {
+    case 'heading':
+    case 'paragraph':
+      result = inlineProse(block.children);
+      break;
+    case 'list':
+      result = block.items.map((item) => blockText(item.children)).join(' ');
+      break;
+    case 'quote':
+    case 'env':
+    case 'callout':
+    case 'footnoteDef':
+      result = blockText(block.children);
+      break;
+    default:
+      result = '';
+  }
+  proseCache.set(block, result);
+  return result;
+}
+
 function blockText(blocks: Block[]): string {
-  return blocks
-    .map((block) => {
-      switch (block.type) {
-        case 'heading':
-        case 'paragraph':
-          return inlineProse(block.children);
-        case 'list':
-          return block.items.map((item) => blockText(item.children)).join(' ');
-        case 'quote':
-        case 'env':
-        case 'callout':
-        case 'footnoteDef':
-          return blockText(block.children);
-        default:
-          return '';
-      }
-    })
-    .join(' ');
+  return blocks.map(singleBlockText).join(' ');
 }
 
 const CALLOUT_ICONS: Record<string, React.ReactNode> = {
@@ -535,7 +563,9 @@ function renderBlocks(blocks: Block[], context: RenderContext, parentDir: TextDi
       case 'math': {
         const plan = context.model.blockMath.get(block);
         if (plan?.hidden) return null;
-        return <MathNode key={index} latex={plan ? plan.latex : block.value} display anchor={plan?.anchor} macrosKey={context.model.macrosKey} />;
+        const source = plan ? plan.latex : block.value;
+        const resolved = resolveMathRefs(source, context.model.labels);
+        return <MathNode key={index} latex={resolved} source={source} display anchor={plan?.anchor} macros={context.macros} macrosKey={context.model.macrosKey} />;
       }
       case 'quote':
         return (
@@ -560,7 +590,7 @@ function renderBlocks(blocks: Block[], context: RenderContext, parentDir: TextDi
               {item.checked !== null ? (
                 <>
                   <span className="md-task-line">
-                    <input type="checkbox" checked={item.checked} readOnly tabIndex={-1} />
+                    <Checkbox checked={item.checked} readOnly size="sm" tabIndex={-1} />
                     <span className="md-task-text">{renderBlocks(item.children.slice(0, 1), context, itemDir, true)}</span>
                   </span>
                   {renderBlocks(item.children.slice(1), context, itemDir, block.tight)}
@@ -644,17 +674,26 @@ function MarkdownRenderer({ content, className, onWikiLink, sourceId, direction 
   const prefix = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const globalMacros = useSettings((state) => state.latexMacros);
   const blocks = useMemo(() => parseMarkdown(content), [content]);
-  const baseDir: TextDirection = direction === 'auto' ? dominantDirection(content) : direction;
-  const persian = baseDir === 'rtl' && hasPersianLetters(content.slice(0, 20_000));
+  const baseDir: TextDirection = useMemo(() => (direction === 'auto' ? dominantDirection(content) : direction), [content, direction]);
+  const persian = useMemo(() => baseDir === 'rtl' && hasPersianLetters(content.slice(0, 20_000)), [baseDir, content]);
   const model = useMemo(
     () => analyzeDocument(blocks, { prefix: `md${prefix}`, globalMacros, formatNumber: persian ? (value) => toPersianDigits(value) : undefined }),
     [blocks, prefix, globalMacros, persian],
   );
+  const macrosCacheRef = useRef<{ key: string; macros: MacroMap }>({ key: '', macros: {} });
+  const stableMacros = useMemo(() => {
+    if (macrosCacheRef.current.key === model.macrosKey) return macrosCacheRef.current.macros;
+    macrosCacheRef.current = { key: model.macrosKey, macros: model.macros };
+    return model.macros;
+  }, [model.macrosKey, model.macros]);
   const handleWikiLink = useMemo(
     () => onWikiLink ?? ((target: string) => void openWikiLink(target, sourceId)),
     [onWikiLink, sourceId],
   );
-  const context = useMemo<RenderContext>(() => ({ model, onWikiLink: handleWikiLink, persian }), [model, handleWikiLink, persian]);
+  const context = useMemo<RenderContext>(
+    () => ({ model, macros: stableMacros, onWikiLink: handleWikiLink, persian }),
+    [model, stableMacros, handleWikiLink, persian],
+  );
   return (
     <Context.Provider value={context}>
       <div className={cn('md', className)} dir={baseDir}>

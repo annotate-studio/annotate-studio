@@ -1629,11 +1629,7 @@ impl TurnRunner<'_> {
 }
 
 pub fn streaming_client() -> Client {
-    Client::builder()
-        .connect_timeout(Duration::from_secs(20))
-        .read_timeout(Duration::from_secs(300))
-        .build()
-        .unwrap_or_else(|_| Client::new())
+    crate::proxy::build_streaming_client()
 }
 
 #[cfg(test)]

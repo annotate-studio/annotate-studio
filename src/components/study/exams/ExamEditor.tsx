@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowDown, ArrowUp, CheckCircle2, Circle, ListChecks, PenLine, Plus, Trash2 } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
+import Checkbox from '@/components/ui/Checkbox';
 import { blankQuestion, type Exam, type ExamQuestion, type QuestionType } from '@/store/exams';
 import { cn, uid } from '@/lib/utils';
 
@@ -155,10 +156,12 @@ export default function ExamEditor({ open, exam, onClose, onSave }: ExamEditorPr
           <span className="field-label">Description</span>
           <input className="input" value={description} dir="auto" onChange={(event) => setDescription(event.target.value)} placeholder="Optional" />
         </label>
-        <label className="checkbox-row field-wide">
-          <input type="checkbox" checked={instantFeedback} onChange={(event) => setInstantFeedback(event.target.checked)} />
-          Show whether each multiple-choice answer is correct right away
-        </label>
+        <Checkbox
+          className="field-wide"
+          checked={instantFeedback}
+          onChange={setInstantFeedback}
+          label="Show whether each multiple-choice answer is correct right away"
+        />
       </div>
 
       <div className="question-list">

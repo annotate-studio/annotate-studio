@@ -38,7 +38,8 @@ let startup: Promise<void> | null = null;
 function startApp(): Promise<void> {
   startup ??= (async () => {
     await useSettings.getState().hydrate();
-    await Promise.all([useCanvas.getState().hydrate(), useLibrary.getState().refresh()]);
+    const [, files] = await Promise.all([useCanvas.getState().hydrate(), useLibrary.getState().refresh()]);
+    useCanvas.getState().seedWorkspaceFiles(files.map((f) => f.path));
     await migrateInlineNotes();
     void useFlashcards.getState().hydrate();
     void useProviders.getState().refresh();

@@ -15,21 +15,22 @@ interface ExamResultsProps {
   onRetake: () => void;
 }
 
-function WrittenGrading({ exam, question }: { exam: Exam; question: ExamQuestion }) {
+function WrittenGrading({ exam, question, externalBusy }: { exam: Exam; question: ExamQuestion; externalBusy?: boolean }) {
   const gradeQuestion = useExams((state) => state.gradeQuestion);
   const [busy, setBusy] = useState(false);
+  const working = busy || Boolean(externalBusy);
 
   const askAi = async () => {
-    if (!question.userAnswer?.trim()) return;
+    if (!question.userAnswer?.trim() || working) return;
     const attempt = exam.completedAt;
     const answer = question.userAnswer;
     setBusy(true);
     try {
-      const result = await gradeWrittenAnswer(question, useSettings.getState().selectedModel || undefined);
+      const result = await gradeWrittenAnswer(question);
       const current = useExams.getState().exams.find((e) => e.id === exam.id);
       const currentQuestion = current?.questions.find((q) => q.id === question.id);
       if (!current || current.status !== 'completed' || current.completedAt !== attempt || currentQuestion?.userAnswer !== answer) return;
-      gradeQuestion(exam.id, question.id, { verdict: result.verdict, feedback: result.feedback });
+      gradeQuestion(exam.id, question.id, { verdict: result.verdict, aiScore: result.score, feedback: result.feedback });
     } catch (error) {
       toast.error('AI grading failed', error);
     } finally {
@@ -39,24 +40,55 @@ function WrittenGrading({ exam, question }: { exam: Exam; question: ExamQuestion
 
   return (
     <div className="grading-row">
-      <span>Your grade:</span>
-      <button type="button" className={cn('btn btn-sm', question.verdict === 'correct' ? 'btn-success' : 'btn-ghost')} onClick={() => gradeQuestion(exam.id, question.id, { verdict: 'correct' })}>
+      <span>Grade:</span>
+      <button type="button" className={cn('btn btn-sm', question.verdict === 'correct' ? 'btn-success' : 'btn-ghost')} onClick={() => gradeQuestion(exam.id, question.id, { verdict: 'correct', aiScore: 100 })}>
         <Check size={13} /> Correct
       </button>
-      <button type="button" className={cn('btn btn-sm', question.verdict === 'incorrect' ? 'btn-danger' : 'btn-ghost')} onClick={() => gradeQuestion(exam.id, question.id, { verdict: 'incorrect' })}>
+      <button type="button" className={cn('btn btn-sm', question.verdict === 'partial' ? 'btn-secondary' : 'btn-ghost')} onClick={() => gradeQuestion(exam.id, question.id, { verdict: 'partial', aiScore: 50 })}>
+        Partial
+      </button>
+      <button type="button" className={cn('btn btn-sm', question.verdict === 'incorrect' ? 'btn-danger' : 'btn-ghost')} onClick={() => gradeQuestion(exam.id, question.id, { verdict: 'incorrect', aiScore: 0 })}>
         <X size={13} /> Incorrect
       </button>
-      <button type="button" className="btn btn-ghost btn-sm" onClick={() => void askAi()} disabled={busy || !question.userAnswer?.trim()}>
-        {busy ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />} Grade with AI
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => void askAi()} disabled={working || !question.userAnswer?.trim()}>
+        {working ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />} {question.feedback ? 'Re-grade with AI' : 'Grade with AI'}
       </button>
     </div>
   );
 }
 
 export default function ExamResults({ exam, onBack, onRetake }: ExamResultsProps) {
+  const gradeQuestion = useExams((state) => state.gradeQuestion);
+  const [gradingAll, setGradingAll] = useState(false);
   const { score, total, percentage } = gradeExam(exam.questions);
   const passed = percentage >= 60;
   const attempts = exam.attempts ?? [];
+  const gradeableWritten = exam.questions.filter((q) => q.type === 'verbal' && q.userAnswer?.trim());
+  const ungradedWritten = gradeableWritten.filter((q) => !q.verdict);
+
+  const gradeAllWritten = async () => {
+    const targets = ungradedWritten.length > 0 ? ungradedWritten : gradeableWritten;
+    if (targets.length === 0 || gradingAll) return;
+    const attempt = exam.completedAt;
+    setGradingAll(true);
+    let gradedCount = 0;
+    try {
+      for (const question of targets) {
+        const answer = question.userAnswer;
+        const result = await gradeWrittenAnswer(question);
+        const current = useExams.getState().exams.find((e) => e.id === exam.id);
+        const currentQuestion = current?.questions.find((q) => q.id === question.id);
+        if (!current || current.status !== 'completed' || current.completedAt !== attempt || currentQuestion?.userAnswer !== answer) break;
+        gradeQuestion(exam.id, question.id, { verdict: result.verdict, aiScore: result.score, feedback: result.feedback });
+        gradedCount += 1;
+      }
+      if (gradedCount > 0) toast.success('Written answers graded', `${gradedCount} answer${gradedCount === 1 ? '' : 's'} evaluated`);
+    } catch (error) {
+      toast.error('AI grading failed', error);
+    } finally {
+      setGradingAll(false);
+    }
+  };
 
   return (
     <div className="page page-narrow">
@@ -64,9 +96,17 @@ export default function ExamResults({ exam, onBack, onRetake }: ExamResultsProps
         <button type="button" className="btn btn-ghost" onClick={onBack}>
           <ArrowLeft size={15} /> Exams
         </button>
-        <button type="button" className="btn btn-secondary" onClick={onRetake}>
-          <RotateCcw size={14} /> Retake
-        </button>
+        <div className="page-actions">
+          {gradeableWritten.length > 0 && (
+            <button type="button" className="btn btn-primary" onClick={() => void gradeAllWritten()} disabled={gradingAll}>
+              {gradingAll ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
+              {ungradedWritten.length > 0 ? `Grade ${ungradedWritten.length} written with AI` : 'Re-grade written with AI'}
+            </button>
+          )}
+          <button type="button" className="btn btn-secondary" onClick={onRetake}>
+            <RotateCcw size={14} /> Retake
+          </button>
+        </div>
       </div>
       <div className={cn('score-card', passed ? 'score-card-pass' : 'score-card-fail')}>
         <div className="score-ring" style={{ '--score': `${percentage}` } as React.CSSProperties}>
@@ -88,13 +128,43 @@ export default function ExamResults({ exam, onBack, onRetake }: ExamResultsProps
       <div className="review-list">
         {exam.questions.map((question, index) => {
           const correct = isAnswerCorrect(question);
+          const partial = question.verdict === 'partial';
           const unanswered = !question.userAnswer?.trim();
           const ungraded = question.type === 'verbal' && !question.verdict && !unanswered && !correct;
+          const statusLabel = correct
+            ? typeof question.aiScore === 'number'
+              ? `Correct · ${question.aiScore}%`
+              : 'Correct'
+            : partial
+              ? typeof question.aiScore === 'number'
+                ? `Partial · ${question.aiScore}%`
+                : 'Partial credit'
+              : unanswered
+                ? 'Not answered'
+                : ungraded
+                  ? 'Needs grading'
+                  : typeof question.aiScore === 'number'
+                    ? `Incorrect · ${question.aiScore}%`
+                    : 'Incorrect';
           return (
-            <div key={question.id} className={cn('review-item', correct ? 'review-item-correct' : unanswered ? 'review-item-skipped' : ungraded ? 'review-item-pending' : 'review-item-wrong')}>
+            <div
+              key={question.id}
+              className={cn(
+                'review-item',
+                correct
+                  ? 'review-item-correct'
+                  : partial
+                    ? 'review-item-pending'
+                    : unanswered
+                      ? 'review-item-skipped'
+                      : ungraded
+                        ? 'review-item-pending'
+                        : 'review-item-wrong',
+              )}
+            >
               <div className="review-item-head">
                 <span>Q{index + 1}</span>
-                <span className="review-item-status">{correct ? 'Correct' : unanswered ? 'Not answered' : ungraded ? 'Needs grading' : 'Incorrect'}</span>
+                <span className="review-item-status">{statusLabel}</span>
               </div>
               <div className="content-selectable">
                 <MarkdownRenderer content={question.question} />
@@ -125,7 +195,7 @@ export default function ExamResults({ exam, onBack, onRetake }: ExamResultsProps
                       <MarkdownRenderer content={question.feedback} />
                     </div>
                   )}
-                  {!unanswered && <WrittenGrading exam={exam} question={question} />}
+                  {!unanswered && <WrittenGrading exam={exam} question={question} externalBusy={gradingAll} />}
                 </div>
               )}
               {question.explanation && (

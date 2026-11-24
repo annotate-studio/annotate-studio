@@ -7,6 +7,7 @@ use crate::ai_models::ModelRegistry;
 use crate::ai_router::AIRouter;
 use crate::analytics::Analytics;
 use crate::paths::Workspace;
+use crate::revisions::{revisions_dir, RevisionStore};
 use crate::search_index::{index_dir, SearchIndex};
 use crate::spaced_repetition::{ReviewQuality, SpacedRepetitionEngine};
 use crate::storage::read_json;
@@ -128,8 +129,9 @@ pub struct AppState {
     pub paths: DataPaths,
     pub ai_router: Mutex<AIRouter>,
     pub models: Mutex<ModelRegistry>,
-    pub stream_client: reqwest::Client,
+    pub stream_client: Mutex<reqwest::Client>,
     pub search_index: Mutex<SearchIndex>,
+    pub revisions: Mutex<RevisionStore>,
     pub flashcards: Mutex<SpacedRepetitionEngine>,
     pub analytics: Analytics,
     pub generations: Generations,
@@ -160,6 +162,10 @@ impl AppState {
         })?;
         let paths = DataPaths::new(&workspace);
 
+        if let Some(settings) = read_json::<serde_json::Value>(&paths.settings) {
+            crate::proxy::update_from_settings(&settings);
+        }
+
         let mut flashcards = SpacedRepetitionEngine::load(paths.flashcards.clone());
         migrate_card_qualities(&mut flashcards, &paths.legacy_card_qualities);
 
@@ -169,21 +175,42 @@ impl AppState {
         let analytics = Analytics::new(paths.analytics_dir.clone());
         let models = ModelRegistry::load(&paths.model_info);
         let search_index = SearchIndex::new(index_dir(workspace.root()));
+        let revisions = RevisionStore::load(revisions_dir(workspace.root()));
 
         Ok(Self {
             workspace,
             paths,
             ai_router: Mutex::new(ai_router),
             models: Mutex::new(models),
-            stream_client: crate::ai_turn::streaming_client(),
+            stream_client: Mutex::new(crate::ai_turn::streaming_client()),
             search_index: Mutex::new(search_index),
+            revisions: Mutex::new(revisions),
             flashcards: Mutex::new(flashcards),
             analytics,
             generations: Generations::default(),
         })
     }
 
+    pub fn http_stream_client(&self) -> reqwest::Client {
+        self.stream_client
+            .lock()
+            .map(|c| c.clone())
+            .unwrap_or_else(|_| crate::ai_turn::streaming_client())
+    }
+
+    pub fn refresh_http_clients(&self) {
+        if let Ok(mut router) = self.ai_router.lock() {
+            router.refresh_client();
+        }
+        if let Ok(mut client) = self.stream_client.lock() {
+            *client = crate::ai_turn::streaming_client();
+        }
+    }
+
     pub fn reload(&self) -> Result<(), String> {
+        if let Some(settings) = read_json::<serde_json::Value>(&self.paths.settings) {
+            crate::proxy::update_from_settings(&settings);
+        }
         {
             let mut engine = self.flashcards.lock().map_err(lock_error)?;
             engine.reload();
@@ -197,9 +224,15 @@ impl AppState {
             let mut index = self.search_index.lock().map_err(lock_error)?;
             *index = SearchIndex::new(index_dir(self.workspace.root()));
         }
+        {
+            let mut revs = self.revisions.lock().map_err(lock_error)?;
+            revs.reload();
+        }
         let mut router = self.ai_router.lock().map_err(lock_error)?;
         *router = AIRouter::new();
         router.load_from_disk(&self.paths.providers);
+        drop(router);
+        self.refresh_http_clients();
         Ok(())
     }
 }

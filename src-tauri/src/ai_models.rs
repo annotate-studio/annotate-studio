@@ -2,7 +2,6 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::time::Duration;
 
 use crate::ai_router::error_message;
 
@@ -449,11 +448,7 @@ pub fn parse_ollama_show(model: &str, body: &Value) -> ModelCapabilities {
 }
 
 fn list_client() -> Client {
-    Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(40))
-        .build()
-        .unwrap_or_else(|_| Client::new())
+    crate::proxy::build_http_client(Some(40), 10)
 }
 
 async fn get_json(request: reqwest::RequestBuilder, provider: &str) -> Result<Value, String> {

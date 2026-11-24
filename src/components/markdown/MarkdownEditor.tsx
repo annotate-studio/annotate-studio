@@ -210,6 +210,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   const themeCompartment = useRef(new Compartment());
   const macroCompartment = useRef(new Compartment());
   const initial = useRef({ direction, zoom, macros });
+  const lastEmittedRef = useRef<string | null>(null);
   onChangeRef.current = onChange;
   onSaveRef.current = onSave;
   getFilesRef.current = getFiles;
@@ -296,14 +297,18 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       ]),
       EditorView.updateListener.of((update) => {
         if (!update.docChanged || update.transactions.every((tr) => tr.annotation(externalSync))) return;
-        onChangeRef.current(update.state.doc.toString());
+        const next = update.state.doc.toString();
+        lastEmittedRef.current = next;
+        onChangeRef.current(next);
       }),
       EditorState.readOnly.of(readOnly),
       themeCompartment.current.of(editorTheme(start.zoom)),
     ];
     if (placeholder) extensions.push(placeholderExtension(placeholder));
+    const initialDoc = value.replace(/\r\n?/g, '\n');
+    lastEmittedRef.current = initialDoc;
     const view = new EditorView({
-      state: EditorState.create({ doc: value, extensions }),
+      state: EditorState.create({ doc: initialDoc, extensions }),
       parent: hostRef.current,
     });
     viewRef.current = view;
@@ -331,8 +336,10 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    const current = view.state.doc.toString();
+    if (value === lastEmittedRef.current) return;
     const next = value.replace(/\r\n?/g, '\n');
+    lastEmittedRef.current = next;
+    const current = view.state.doc.toString();
     if (current === next) return;
     const head = Math.min(view.state.selection.main.head, next.length);
     view.dispatch({

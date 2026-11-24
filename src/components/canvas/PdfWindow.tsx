@@ -5,14 +5,14 @@ import { createPluginRegistration } from '@embedpdf/core';
 import { EmbedPDF, useDocumentState } from '@embedpdf/core/react';
 import { DocumentManagerPluginPackage, useActiveDocument, useDocumentManagerCapability } from '@embedpdf/plugin-document-manager/react';
 import { Viewport, ViewportPluginPackage } from '@embedpdf/plugin-viewport/react';
-import { Scroller, ScrollPluginPackage, useScroll } from '@embedpdf/plugin-scroll/react';
+import { Scroller, ScrollPluginPackage, useScroll, useScrollCapability } from '@embedpdf/plugin-scroll/react';
 import { RenderLayer, RenderPluginPackage } from '@embedpdf/plugin-render/react';
 import { InteractionManagerPluginPackage, PagePointerProvider } from '@embedpdf/plugin-interaction-manager/react';
 import { SelectionLayer, SelectionPluginPackage, useSelectionCapability } from '@embedpdf/plugin-selection/react';
 import { AnnotationLayer, AnnotationPluginPackage, useAnnotation, useAnnotationCapability } from '@embedpdf/plugin-annotation/react';
 import { LockModeType } from '@embedpdf/plugin-annotation';
 import { HistoryPluginPackage, useHistoryCapability } from '@embedpdf/plugin-history/react';
-import { useZoom, ZoomPluginPackage } from '@embedpdf/plugin-zoom/react';
+import { useZoom, useZoomCapability, ZoomPluginPackage } from '@embedpdf/plugin-zoom/react';
 import { ZoomMode } from '@embedpdf/plugin-zoom';
 import { ExportPluginPackage, useExport } from '@embedpdf/plugin-export/react';
 import {
@@ -104,8 +104,8 @@ function usePdfPlugins() {
     () => [
       createPluginRegistration(DocumentManagerPluginPackage, { maxDocuments: 1 }),
       createPluginRegistration(ViewportPluginPackage, { viewportGap: 16 }),
-      createPluginRegistration(ScrollPluginPackage, { defaultPageGap: 14 }),
-      createPluginRegistration(RenderPluginPackage),
+      createPluginRegistration(ScrollPluginPackage, { defaultPageGap: 14, defaultBufferSize: 1 }),
+      createPluginRegistration(RenderPluginPackage, { defaultImageType: 'image/webp', defaultImageQuality: 0.9 }),
       createPluginRegistration(InteractionManagerPluginPackage),
       createPluginRegistration(SelectionPluginPackage),
       createPluginRegistration(HistoryPluginPackage),
@@ -151,7 +151,11 @@ function PdfWindow({ resourceId, path, title, active }: PdfWindowProps) {
       .then(() => readFileBytes(path))
       .then((data) => {
         if (cancelled) return;
-        setBytes(data.slice().buffer as ArrayBuffer);
+        const buffer =
+          data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
+            ? (data.buffer as ArrayBuffer)
+            : (data.slice().buffer as ArrayBuffer);
+        setBytes(buffer);
       })
       .catch((err) => !cancelled && setError(err instanceof Error ? err.message : String(err)));
     return () => {
@@ -309,7 +313,7 @@ function useCanvasZoom(): number {
   return settled;
 }
 
-function ScaledPage({
+const ScaledPage = memo(function ScaledPage({
   documentId,
   pageIndex,
   children,
@@ -347,7 +351,69 @@ function ScaledPage({
       {children}
     </PagePointerProvider>
   );
-}
+});
+
+const PdfPageControls = memo(function PdfPageControls({ documentId, fallbackTotal }: { documentId: string; fallbackTotal: number }) {
+  const { provides: scroll, state: scrollState } = useScroll(documentId);
+  const [pageInput, setPageInput] = useState('');
+  const currentPage = scrollState?.currentPage ?? 1;
+  const totalPages = scrollState?.totalPages || fallbackTotal;
+
+  return (
+    <div className="pdf-tool-group">
+      <button type="button" className="tool-btn" onClick={() => scroll?.scrollToPreviousPage()} disabled={currentPage <= 1} title="Previous page">
+        <ChevronLeft size={14} />
+      </button>
+      <input
+        className="page-input"
+        value={pageInput || String(currentPage)}
+        onFocus={(event) => {
+          setPageInput(String(currentPage));
+          event.currentTarget.select();
+        }}
+        onChange={(event) => setPageInput(event.target.value.replace(/[^\d]/g, ''))}
+        onBlur={() => setPageInput('')}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter') return;
+          const target = Math.min(Math.max(1, parseInt(pageInput || '1', 10)), totalPages || 1);
+          scroll?.scrollToPage({ pageNumber: target });
+          setPageInput('');
+          event.currentTarget.blur();
+        }}
+        aria-label="Page number"
+      />
+      <span className="page-total">/ {totalPages || '–'}</span>
+      <button
+        type="button"
+        className="tool-btn"
+        onClick={() => scroll?.scrollToNextPage()}
+        disabled={totalPages === 0 || currentPage >= totalPages}
+        title="Next page"
+      >
+        <ChevronRight size={14} />
+      </button>
+    </div>
+  );
+});
+
+const PdfZoomControls = memo(function PdfZoomControls({ documentId }: { documentId: string }) {
+  const { provides: zoom, state: zoomState } = useZoom(documentId);
+  const zoomPercent = Math.round((zoomState?.currentZoomLevel ?? 1) * 100);
+
+  return (
+    <div className="pdf-tool-group">
+      <button type="button" className="tool-btn" onClick={() => zoom?.zoomOut()} title="Zoom out (Ctrl+-)">
+        <ZoomOut size={14} />
+      </button>
+      <button type="button" className="zoom-label" onClick={() => zoom?.requestZoom(ZoomMode.FitWidth)} title="Fit width (Ctrl+0)">
+        {zoomPercent}%
+      </button>
+      <button type="button" className="tool-btn" onClick={() => zoom?.zoomIn()} title="Zoom in (Ctrl+=)">
+        <ZoomIn size={14} />
+      </button>
+    </div>
+  );
+});
 
 function PdfWorkspace({ documentId, resourceId, path, title, active }: Omit<PdfWindowProps, 'bytes'> & { documentId: string }) {
   const [tool, setTool] = useState<Tool>('select');
@@ -362,22 +428,26 @@ function PdfWorkspace({ documentId, resourceId, path, title, active }: Omit<PdfW
   const { provides: annotationCapability } = useAnnotationCapability();
   const { provides: selection } = useSelectionCapability();
   const { provides: history } = useHistoryCapability();
-  const { provides: zoom, state: zoomState } = useZoom(documentId);
-  const { provides: scroll, state: scrollState } = useScroll(documentId);
+  const { provides: zoomCapability } = useZoomCapability();
+  const { provides: scrollCapability } = useScrollCapability();
   const documentState = useDocumentState(documentId);
   const { provides: exporter } = useExport(documentId);
   const { state: saveState, save } = useAutosave(documentId, path);
   const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
   const maximized = useCanvas((state) => activeWorkspace(state).resources.find((r) => r.id === resourceId)?.maximized ?? false);
   const canvasZoom = useCanvasZoom();
-  const [pageInput, setPageInput] = useState('');
 
-  const baseDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-  const dpr = maximized ? baseDpr : Math.min(4, Math.round(baseDpr * Math.max(1, canvasZoom) * 2) / 2);
+  const zoom = useMemo(() => zoomCapability?.forDocument(documentId) ?? null, [zoomCapability, documentId]);
+  const scroll = useMemo(() => scrollCapability?.forDocument(documentId) ?? null, [scrollCapability, documentId]);
+
+  const baseDpr = typeof window !== 'undefined' ? Math.min(2, window.devicePixelRatio || 1) : 1;
+  const docScale = documentState?.scale ?? 1;
+  const maxDprForScale = docScale > 2 ? 1.5 : docScale > 1.25 ? 2 : 2.5;
+  const dpr = maximized ? baseDpr : Math.min(maxDprForScale, Math.round(baseDpr * Math.max(1, canvasZoom) * 2) / 2);
 
   const selectedUids = useMemo(() => annotationState?.selectedUids ?? [], [annotationState?.selectedUids]);
   const layerZoom = maximized ? 1 : canvasZoom;
-  const layerScale = (documentState?.scale ?? 1) * layerZoom;
+  const layerScale = docScale * layerZoom;
 
   useEffect(() => {
     annotationScope?.setActiveTool(TOOL_IDS[tool]);
@@ -608,6 +678,9 @@ function PdfWorkspace({ documentId, resourceId, path, title, active }: Omit<PdfW
   useEffect(() => {
     const element = viewportRef.current;
     if (!element) return;
+    let pendingDelta = 0;
+    let lastPoint: { vx: number; vy: number } | null = null;
+    let frame = 0;
     const onWheel = (event: WheelEvent) => {
       if (!(event.ctrlKey || event.metaKey) || !useSettings.getState().ctrlWheelZoom) return;
       const windowElement = element.closest('[data-window-id]');
@@ -617,49 +690,66 @@ function PdfWorkspace({ documentId, resourceId, path, title, active }: Omit<PdfW
       if (!zoom) return;
       const rect = element.getBoundingClientRect();
       const cssScale = element.offsetWidth ? rect.width / element.offsetWidth : 1;
-      const delta = -event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0025);
-      zoom.requestZoomBy(Math.max(-0.5, Math.min(0.5, delta)), {
+      pendingDelta += -event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0025);
+      lastPoint = {
         vx: (event.clientX - rect.left) / cssScale,
         vy: (event.clientY - rect.top) / cssScale,
-      } as never);
+      };
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const delta = Math.max(-0.5, Math.min(0.5, pendingDelta));
+        pendingDelta = 0;
+        if (delta !== 0 && lastPoint) zoom.requestZoomBy(delta, lastPoint as never);
+      });
     };
     element.addEventListener('wheel', onWheel, { passive: false });
-    return () => element.removeEventListener('wheel', onWheel);
+    return () => {
+      element.removeEventListener('wheel', onWheel);
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, [zoom, maximized]);
+
+  const selectionActionsRef = useRef({ selectedText, clearSelection, markupSelection, sendToAi });
+  selectionActionsRef.current = { selectedText, clearSelection, markupSelection, sendToAi };
 
   const renderSelectionMenu = useCallback(
     ({ menuWrapperProps, placement }: { menuWrapperProps: React.HTMLAttributes<HTMLDivElement>; placement: { suggestTop?: boolean } }) => (
       <div {...menuWrapperProps}>
         <div className={cn('pdf-float-menu', placement.suggestTop ? 'pdf-float-menu-top' : 'pdf-float-menu-bottom')}>
-          <button type="button" onClick={() =>
-              void selectedText().then(async (text) => {
+          <button
+            type="button"
+            onClick={() =>
+              void selectionActionsRef.current.selectedText().then(async (text) => {
                 if (!text) return;
                 await copyText(text);
-                clearSelection();
+                selectionActionsRef.current.clearSelection();
               })
-            } title="Copy">
+            }
+            title="Copy"
+          >
             <Copy size={13} /> Copy
           </button>
-          <button type="button" onClick={() => markupSelection(PdfAnnotationSubtype.HIGHLIGHT)} title="Highlight">
+          <button type="button" onClick={() => selectionActionsRef.current.markupSelection(PdfAnnotationSubtype.HIGHLIGHT)} title="Highlight">
             <Highlighter size={13} /> Highlight
           </button>
-          <button type="button" onClick={() => markupSelection(PdfAnnotationSubtype.UNDERLINE)} title="Underline">
+          <button type="button" onClick={() => selectionActionsRef.current.markupSelection(PdfAnnotationSubtype.UNDERLINE)} title="Underline">
             <PenLine size={13} /> Underline
           </button>
           <span className="pdf-float-divider" />
-          <button type="button" onClick={() => void sendToAi('ask')} title="Ask the AI about this text">
+          <button type="button" onClick={() => void selectionActionsRef.current.sendToAi('ask')} title="Ask the AI about this text">
             <MessageSquareText size={13} /> Ask AI
           </button>
-          <button type="button" onClick={() => void sendToAi('explain')} title="Explain step by step">
+          <button type="button" onClick={() => void selectionActionsRef.current.sendToAi('explain')} title="Explain step by step">
             <BookOpenCheck size={13} /> Explain
           </button>
-          <button type="button" onClick={() => void sendToAi('flashcards')} title="Create flashcards from the selection">
+          <button type="button" onClick={() => void selectionActionsRef.current.sendToAi('flashcards')} title="Create flashcards from the selection">
             Flashcards
           </button>
         </div>
       </div>
     ),
-    [selectedText, clearSelection, markupSelection, sendToAi],
+    [],
   );
 
   const renderAnnotationMenu = useCallback(
@@ -723,9 +813,7 @@ function PdfWorkspace({ documentId, resourceId, path, title, active }: Omit<PdfW
     [documentId, dpr, drawingTool, renderSelectionMenu, renderAnnotationMenu, layerZoom, layerScale],
   );
 
-  const currentPage = scrollState?.currentPage ?? 1;
-  const totalPages = documentState?.document?.pageCount ?? scrollState?.totalPages ?? 0;
-  const zoomPercent = Math.round((zoomState?.currentZoomLevel ?? 1) * 100);
+  const totalPages = documentState?.document?.pageCount ?? 0;
   const showColor = tool !== 'select' && tool !== 'eraser';
   const activeColor = tool === 'highlight' || tool === 'marker' ? highlightColor : color;
 
@@ -788,50 +876,8 @@ function PdfWorkspace({ documentId, resourceId, path, title, active }: Omit<PdfW
             <Redo2 size={14} />
           </button>
         </div>
-        <div className="pdf-tool-group">
-          <button type="button" className="tool-btn" onClick={() => scroll?.scrollToPreviousPage()} disabled={currentPage <= 1} title="Previous page">
-            <ChevronLeft size={14} />
-          </button>
-          <input
-            className="page-input"
-            value={pageInput || String(currentPage)}
-            onFocus={(event) => {
-              setPageInput(String(currentPage));
-              event.currentTarget.select();
-            }}
-            onChange={(event) => setPageInput(event.target.value.replace(/[^\d]/g, ''))}
-            onBlur={() => setPageInput('')}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter') return;
-              const target = Math.min(Math.max(1, parseInt(pageInput || '1', 10)), totalPages || 1);
-              scroll?.scrollToPage({ pageNumber: target });
-              setPageInput('');
-              event.currentTarget.blur();
-            }}
-            aria-label="Page number"
-          />
-          <span className="page-total">/ {totalPages || '–'}</span>
-          <button
-            type="button"
-            className="tool-btn"
-            onClick={() => scroll?.scrollToNextPage()}
-            disabled={totalPages === 0 || currentPage >= totalPages}
-            title="Next page"
-          >
-            <ChevronRight size={14} />
-          </button>
-        </div>
-        <div className="pdf-tool-group">
-          <button type="button" className="tool-btn" onClick={() => zoom?.zoomOut()} title="Zoom out (Ctrl+-)">
-            <ZoomOut size={14} />
-          </button>
-          <button type="button" className="zoom-label" onClick={() => zoom?.requestZoom(ZoomMode.FitWidth)} title="Fit width (Ctrl+0)">
-            {zoomPercent}%
-          </button>
-          <button type="button" className="tool-btn" onClick={() => zoom?.zoomIn()} title="Zoom in (Ctrl+=)">
-            <ZoomIn size={14} />
-          </button>
-        </div>
+        <PdfPageControls documentId={documentId} fallbackTotal={totalPages} />
+        <PdfZoomControls documentId={documentId} />
         <div className="pdf-toolbar-spacer" />
         <span className={cn('save-state', `save-state-${saveState}`)}>
           {saveState === 'pending' || saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Not saved' : ''}

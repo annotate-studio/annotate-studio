@@ -2,7 +2,7 @@ import type { ProviderInfo } from '@/lib/tauri-commands';
 import { resolveModel, useProviders } from '@/store/providers';
 import { useSettings } from '@/store/settings';
 
-export type ModelRole = 'assistant' | 'reasoning' | 'vision';
+export type ModelRole = 'assistant' | 'fast' | 'reasoning' | 'vision';
 
 export async function ensureProviders(): Promise<ProviderInfo[]> {
   const store = useProviders.getState();
@@ -21,6 +21,7 @@ export function modelFor(role: ModelRole): ProviderInfo | undefined {
   const settings = useSettings.getState();
   const assistant = resolveModel(settings.selectedModel, providers);
   if (role === 'assistant') return assistant;
+  if (role === 'fast') return (settings.fastModel && providerById(settings.fastModel)) || assistant;
   if (role === 'reasoning') return (settings.reasoningModel && providerById(settings.reasoningModel)) || assistant;
   const explicit = settings.visionModel ? providerById(settings.visionModel) : undefined;
   if (explicit) return explicit;

@@ -3,7 +3,7 @@ import { extractJsonObjects } from '@/lib/ai';
 import { uid } from '@/lib/utils';
 import { fitMessages, partText, text } from './context';
 import { inputBudget } from './models';
-import type { AgentTool, ToolContext, ToolResult, ToolUndo } from './tools';
+import type { AgentTool, ToolContext, ToolDiff, ToolResult, ToolUndo } from './tools';
 
 export interface AgentStep {
   id: string;
@@ -13,6 +13,7 @@ export interface AgentStep {
   summary?: string;
   paths?: string[];
   undo?: ToolUndo;
+  diff?: ToolDiff;
   undone?: boolean;
 }
 
@@ -212,7 +213,8 @@ export async function runAgent(run: AgentRun): Promise<AgentResult> {
       entry.status = result.error ? 'error' : 'done';
       entry.summary = result.summary;
       entry.paths = result.paths;
-      entry.undo = result.undo && result.undo.previous !== null ? result.undo : undefined;
+      entry.undo = result.undo;
+      entry.diff = result.diff;
       callbacks.onStep({ ...entry });
       if (textProtocol) {
         results.push({ role: 'user', content: [{ type: 'text', text: `Result of ${call.name}:\n${result.text}` }, ...(result.images ?? [])] });

@@ -27,7 +27,7 @@ function wheelDelta(event: WheelEvent, pageSize: number): { dx: number; dy: numb
 
 function isBackground(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
-  if (target.closest('[data-window-id], [data-canvas-ui], button, a, input, textarea')) return false;
+  if (target.closest('[data-window-id], [data-canvas-ui], .canvas-empty, button, a, input, textarea')) return false;
   return target.closest('[data-canvas-surface]') !== null;
 }
 
@@ -44,6 +44,7 @@ function dropPointToClient(position: { x: number; y: number }): { x: number; y: 
 export default function CanvasViewport() {
   const containerRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
   const movingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const spaceRef = useRef(false);
   const panPointer = useRef<number | null>(null);
@@ -57,6 +58,17 @@ export default function CanvasViewport() {
   const view = workspace.view;
   const visible = useMemo(() => workspace.resources.filter((r) => !r.minimized), [workspace.resources]);
   const maximized = visible.some((r) => r.maximized);
+
+  const applyViewDom = useCallback((x: number, y: number, zoom: number) => {
+    const world = worldRef.current;
+    if (world) world.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${zoom})`;
+    const grid = gridRef.current;
+    if (grid) {
+      const nextStep = gridStep(zoom);
+      grid.style.backgroundSize = `${nextStep}px ${nextStep}px`;
+      grid.style.backgroundPosition = `${x}px ${y}px`;
+    }
+  }, []);
 
   const markMoving = useCallback(() => {
     const world = worldRef.current;
@@ -87,28 +99,64 @@ export default function CanvasViewport() {
   useEffect(() => {
     const element = containerRef.current;
     if (!element) return;
+    let frame = 0;
+    let pendingPanX = 0;
+    let pendingPanY = 0;
+    let pendingZoomDy = 0;
+    let zoomAnchor: { x: number; y: number } | null = null;
+
+    const flushWheel = () => {
+      frame = 0;
+      const state = useCanvas.getState();
+      if (isFrozen(state)) {
+        pendingPanX = 0;
+        pendingPanY = 0;
+        pendingZoomDy = 0;
+        zoomAnchor = null;
+        return;
+      }
+      if (pendingZoomDy !== 0 && zoomAnchor) {
+        const current = activeWorkspace(state);
+        const factor = Math.min(2, Math.max(0.5, Math.exp(-pendingZoomDy * 0.0018)));
+        pendingZoomDy = 0;
+        state.zoomAt(current.view.zoom * factor, zoomAnchor);
+        zoomAnchor = null;
+      }
+      if (pendingPanX !== 0 || pendingPanY !== 0) {
+        const dx = pendingPanX;
+        const dy = pendingPanY;
+        pendingPanX = 0;
+        pendingPanY = 0;
+        state.panBy(dx, dy);
+      }
+      markMoving();
+    };
+
     const onWheel = (event: WheelEvent) => {
       const state = useCanvas.getState();
-      const current = activeWorkspace(state);
       const frozen = isFrozen(state);
       const { dx, dy } = wheelDelta(event, element.clientHeight);
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
         if (frozen) return;
         const rect = element.getBoundingClientRect();
-        const factor = Math.min(2, Math.max(0.5, Math.exp(-dy * 0.0018)));
-        state.zoomAt(current.view.zoom * factor, { x: event.clientX - rect.left, y: event.clientY - rect.top });
-        markMoving();
+        pendingZoomDy += dy;
+        zoomAnchor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        if (!frame) frame = requestAnimationFrame(flushWheel);
         return;
       }
       if (!isBackground(event.target) || frozen) return;
       event.preventDefault();
       const horizontal = event.shiftKey && dx === 0;
-      state.panBy(-(horizontal ? dy : dx), -(horizontal ? 0 : dy));
-      markMoving();
+      pendingPanX += -(horizontal ? dy : dx);
+      pendingPanY += -(horizontal ? 0 : dy);
+      if (!frame) frame = requestAnimationFrame(flushWheel);
     };
     element.addEventListener('wheel', onWheel, { passive: false });
-    return () => element.removeEventListener('wheel', onWheel);
+    return () => {
+      element.removeEventListener('wheel', onWheel);
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, [markMoving]);
 
   const startPan = useCallback(
@@ -132,14 +180,17 @@ export default function CanvasViewport() {
         if (frame) return;
         frame = requestAnimationFrame(() => {
           frame = 0;
-          useCanvas.getState().setView({ x: origin.x + latest.x - start.x, y: origin.y + latest.y - start.y, zoom: origin.zoom });
+          applyViewDom(origin.x + latest.x - start.x, origin.y + latest.y - start.y, origin.zoom);
           markMoving();
         });
       };
       const onEnd = (e: PointerEvent) => {
         if (e.pointerId !== pointerId) return;
         if (frame) cancelAnimationFrame(frame);
-        useCanvas.getState().setView({ x: origin.x + latest.x - start.x, y: origin.y + latest.y - start.y, zoom: origin.zoom });
+        const finalX = origin.x + latest.x - start.x;
+        const finalY = origin.y + latest.y - start.y;
+        applyViewDom(finalX, finalY, origin.zoom);
+        useCanvas.getState().setView({ x: finalX, y: finalY, zoom: origin.zoom });
         element.removeEventListener('pointermove', onMove);
         element.removeEventListener('pointerup', onEnd);
         element.removeEventListener('pointercancel', onEnd);
@@ -151,7 +202,7 @@ export default function CanvasViewport() {
       element.addEventListener('pointercancel', onEnd);
       return true;
     },
-    [markMoving],
+    [applyViewDom, markMoving],
   );
 
   useEffect(() => {
@@ -318,10 +369,11 @@ export default function CanvasViewport() {
       }}
     >
       <div
+        ref={gridRef}
         className="canvas-grid"
         style={{ backgroundSize: `${step}px ${step}px`, backgroundPosition: `${view.x}px ${view.y}px` }}
       />
-      <div ref={worldRef} className="canvas-world" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
+      <div ref={worldRef} className="canvas-world" style={{ transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.zoom})` }}>
         {workspace.resources.map((resource) => (
           <CanvasWindow key={resource.id} resource={resource} />
         ))}

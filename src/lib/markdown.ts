@@ -577,9 +577,10 @@ function parseDestination(src: string, open: number): { href: string; end: numbe
   return null;
 }
 
-const URL_PATTERN = /^(https?:\/\/[^\s<>]+)/i;
-const REF_PATTERN = /^\\(eqref|ref|autoref|cref|Cref)\{([^}\n]+)\}/;
-const CITE_PATTERN = /^\\(cite|citep|citet|parencite|textcite)(?:\[[^\]]*\])?\{([^}\n]+)\}/;
+const URL_PATTERN = /(https?:\/\/[^\s<>]+)/iy;
+const AUTO_PATTERN = /<((?:https?:\/\/|mailto:)[^\s<>]+)>/iy;
+const REF_PATTERN = /\\(eqref|ref|autoref|cref|Cref)\{([^}\n]+)\}/y;
+const CITE_PATTERN = /\\(cite|citep|citet|parencite|textcite)(?:\[[^\]]*\])?\{([^}\n]+)\}/y;
 
 export function parseInline(src: string): Inline[] {
   const out: Inline[] = [];
@@ -608,14 +609,16 @@ export function parseInline(src: string): Inline[] {
     }
 
     if (char === '\\' && next !== undefined && /[A-Za-z]/.test(next)) {
-      const ref = REF_PATTERN.exec(src.slice(i));
+      REF_PATTERN.lastIndex = i;
+      const ref = REF_PATTERN.exec(src);
       if (ref) {
         flush();
         out.push({ type: 'ref', key: ref[2].trim(), style: ref[1] === 'eqref' ? 'eqref' : ref[1] === 'ref' ? 'ref' : 'auto' });
         i += ref[0].length;
         continue;
       }
-      const cite = CITE_PATTERN.exec(src.slice(i));
+      CITE_PATTERN.lastIndex = i;
+      const cite = CITE_PATTERN.exec(src);
       if (cite) {
         flush();
         out.push({ type: 'cite', keys: cite[2].split(',').map((key) => key.trim()).filter(Boolean) });
@@ -751,7 +754,8 @@ export function parseInline(src: string): Inline[] {
     }
 
     if (char === '<') {
-      const auto = /^<((?:https?:\/\/|mailto:)[^\s<>]+)>/i.exec(src.slice(i));
+      AUTO_PATTERN.lastIndex = i;
+      const auto = AUTO_PATTERN.exec(src);
       if (auto) {
         flush();
         out.push({ type: 'link', href: auto[1], children: [{ type: 'text', value: auto[1].replace(/^mailto:/i, '') }] });
@@ -760,8 +764,9 @@ export function parseInline(src: string): Inline[] {
       }
     }
 
-    if ((char === 'h' || char === 'H') && (i === 0 || /[\s(]/.test(src[i - 1]))) {
-      const url = URL_PATTERN.exec(src.slice(i));
+    if ((char === 'h' || char === 'H') && (next === 't' || next === 'T') && (i === 0 || /[\s(]/.test(src[i - 1]))) {
+      URL_PATTERN.lastIndex = i;
+      const url = URL_PATTERN.exec(src);
       if (url) {
         let value = url[1];
         while (/[.,;:!?)\]'"]$/.test(value)) {

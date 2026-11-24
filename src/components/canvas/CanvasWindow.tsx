@@ -11,6 +11,7 @@ import {
   NotebookPen,
   Pencil,
   ScanSearch,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -30,15 +31,17 @@ import { toast } from '@/store/toast';
 import PdfWindow from './PdfWindow';
 import NoteWindow from './NoteWindow';
 import ImageWindow from './ImageWindow';
+import VisualWindow from './VisualWindow';
 import AiActionsButton from './AiActionsButton';
 
 type Handle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 const HANDLES: Handle[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 
-const TYPE_ICONS = {
+const TYPE_ICONS: Record<Resource['type'], React.ReactNode> = {
   pdf: <FileText size={14} />,
   note: <NotebookPen size={14} />,
   image: <ImageIcon size={14} />,
+  visual: <Sparkles size={14} />,
 };
 
 function currentZoom(): number {
@@ -54,14 +57,20 @@ const WindowBody = memo(function WindowBody({
   type,
   filePath,
   title,
+  visualization,
   selected,
 }: {
   id: string;
   type: Resource['type'];
   filePath?: string;
   title: string;
+  visualization?: Resource['visualization'];
   selected: boolean;
 }) {
+  if (type === 'visual') {
+    if (!visualization) return <div className="cw-empty">This visual has no data.</div>;
+    return <VisualWindow resourceId={id} title={title} visualization={visualization} />;
+  }
   if (!filePath) {
     return <div className="cw-empty">This window has no file attached.</div>;
   }
@@ -107,7 +116,7 @@ function CanvasWindow({ resource }: { resource: Resource }) {
         setInteraction('dragging');
       }
       next = { x: snap(origin.x + dx / zoom, e.shiftKey), y: snap(origin.y + dy / zoom, e.shiftKey) };
-      frame.style.transform = `translate(${next.x}px, ${next.y}px)`;
+      frame.style.transform = `translate3d(${next.x}px, ${next.y}px, 0)`;
     };
     const onEnd = () => {
       handle.removeEventListener('pointermove', onMove);
@@ -153,7 +162,7 @@ function CanvasWindow({ resource }: { resource: Resource }) {
         y = origin.y + origin.height - height;
       }
       next = { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
-      frame.style.transform = `translate(${next.x}px, ${next.y}px)`;
+      frame.style.transform = `translate3d(${next.x}px, ${next.y}px, 0)`;
       frame.style.width = `${next.width}px`;
       frame.style.height = `${next.height}px`;
     };
@@ -231,7 +240,7 @@ function CanvasWindow({ resource }: { resource: Resource }) {
           zIndex: 1_000_000,
         }
       : {
-          transform: `translate(${resource.x}px, ${resource.y}px)`,
+          transform: `translate3d(${resource.x}px, ${resource.y}px, 0)`,
           width: resource.width,
           height: resource.height,
           zIndex: resource.z,
@@ -306,6 +315,7 @@ function CanvasWindow({ resource }: { resource: Resource }) {
           type={resource.type}
           filePath={resource.filePath}
           title={resource.title}
+          visualization={resource.visualization}
           selected={selected}
         />
       </div>

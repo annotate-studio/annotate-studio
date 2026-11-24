@@ -1,6 +1,6 @@
 'use client';
 
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Bold,
@@ -10,6 +10,7 @@ import {
   FileCode2,
   FileOutput,
   Heading2,
+  History,
   Italic,
   Link2,
   List,
@@ -29,6 +30,7 @@ import {
 } from 'lucide-react';
 import MarkdownEditor, { type EditorLanguage, type MarkdownEditorHandle } from '@/components/markdown/MarkdownEditor';
 import MarkdownRenderer from '@/components/markdown/MarkdownRenderer';
+import NoteHistoryPanel from '@/components/markdown/NoteHistoryPanel';
 import Popover from '@/components/ui/Popover';
 import { useNotes } from '@/store/notes';
 import { useLibrary } from '@/store/library';
@@ -50,9 +52,19 @@ const modeMemory = new Map<string, Mode>();
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 3;
 
+const WORD_RE = /[\p{L}\p{N}][\p{L}\p{N}'’\u200c-]*/gu;
+
 function wordCount(text: string): number {
-  const words = text.trim().match(/[\p{L}\p{N}][\p{L}\p{N}'’\u200c-]*/gu);
-  return words ? words.length : 0;
+  let count = 0;
+  WORD_RE.lastIndex = 0;
+  while (WORD_RE.exec(text) !== null) count += 1;
+  return count;
+}
+
+function previewDelay(length: number): number {
+  if (length < 8_000) return 80;
+  if (length < 40_000) return 180;
+  return 320;
 }
 
 function clampZoom(value: number): number {
@@ -101,6 +113,7 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
   const files = useLibrary((state) => state.files);
   const [mode, setModeState] = useState<Mode>(() => modeMemory.get(resourceId) ?? (width >= 760 ? 'split' : 'edit'));
   const [insertOpen, setInsertOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [compiling, setCompiling] = useState(false);
   const [issues, setIssues] = useState<CompileIssue[] | null>(null);
   const editorRef = useRef<MarkdownEditorHandle>(null);
@@ -183,10 +196,38 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
 
   const resolveImage = useCallback((target: string) => resolveWorkspaceImage(target, files), [files]);
 
+  const rawContent = buffer?.status === 'ready' ? buffer.content : '';
+  const canSplit = width >= 560 || maximized;
+  const view: Mode = mode === 'split' && !canSplit ? 'edit' : mode;
+  const showEditor = view !== 'preview';
+  const showPreview = view !== 'edit';
+
+  const [debouncedContent, setDebouncedContent] = useState(rawContent);
+  const wasShowingPreview = useRef(showPreview);
+
+  useEffect(() => {
+    if (!showPreview) {
+      wasShowingPreview.current = false;
+      return;
+    }
+    if (!wasShowingPreview.current) {
+      wasShowingPreview.current = true;
+      setDebouncedContent(rawContent);
+      return;
+    }
+    if (rawContent === debouncedContent) return;
+    const timer = setTimeout(() => setDebouncedContent(rawContent), previewDelay(rawContent.length));
+    return () => clearTimeout(timer);
+  }, [rawContent, showPreview, debouncedContent]);
+
+  const deferredPreviewContent = useDeferredValue(debouncedContent);
+  const deferredWordContent = useDeferredValue(rawContent);
+  const words = useMemo(() => wordCount(deferredWordContent), [deferredWordContent]);
+
   const previewSource = useMemo(() => {
-    if (!buffer || buffer.status !== 'ready') return '';
-    return language === 'latex' ? latexToMarkdown(buffer.content, { resolveImage }) : buffer.content;
-  }, [buffer, language, resolveImage]);
+    if (!showPreview || !deferredPreviewContent) return '';
+    return language === 'latex' ? latexToMarkdown(deferredPreviewContent, { resolveImage }) : deferredPreviewContent;
+  }, [showPreview, deferredPreviewContent, language, resolveImage]);
 
   if (!buffer || buffer.status === 'loading') {
     return (
@@ -205,10 +246,6 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
     );
   }
 
-  const canSplit = width >= 560 || maximized;
-  const view: Mode = mode === 'split' && !canSplit ? 'edit' : mode;
-  const showEditor = view !== 'preview';
-  const showPreview = view !== 'edit';
   const status = buffer.error ? 'Not saved' : buffer.saving || buffer.dirty ? 'Saving…' : buffer.savedAt ? 'Saved' : '';
   const latex = language === 'latex';
 
@@ -274,7 +311,8 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
   };
 
   const present = () => {
-    useApp.getState().requestChat({ kind: 'walkthrough', title: stripExtension(title), markdown: previewSource });
+    const markdown = language === 'latex' ? latexToMarkdown(rawContent, { resolveImage }) : rawContent;
+    useApp.getState().requestChat({ kind: 'walkthrough', title: stripExtension(title), markdown });
   };
 
   const directionIcon = direction === 'rtl' ? <PilcrowLeft size={14} /> : direction === 'ltr' ? <PilcrowRight size={14} /> : <Pilcrow size={14} />;
@@ -404,6 +442,9 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
         <button type="button" className={cn('tool-btn', direction !== 'auto' && 'tool-btn-active')} onClick={cycleDirection} title={`${directionLabel} (click to change)`}>
           {directionIcon}
         </button>
+        <button type="button" className={cn('tool-btn', historyOpen && 'tool-btn-active')} onClick={() => setHistoryOpen((v) => !v)} title="Revision history & diff">
+          <History size={14} />
+        </button>
         <button type="button" className="tool-btn" onClick={present} title="Present step by step">
           <Presentation size={14} />
         </button>
@@ -423,7 +464,7 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
             </button>
           </>
         )}
-        <span className="note-meta">{wordCount(buffer.content)} words</span>
+        <span className="note-meta">{words} words</span>
         <span className={cn('save-state', buffer.error ? 'save-state-error' : buffer.dirty || buffer.saving ? 'save-state-pending' : 'save-state-saved')}>
           {status}
         </span>
@@ -456,7 +497,7 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
           </ul>
         </div>
       )}
-      <div className={cn('note-body', view === 'split' && 'note-body-split')}>
+      <div className={cn('note-body', (view === 'split' || historyOpen) && 'note-body-split')}>
         <div className={cn('note-pane note-editor-pane', !showEditor && 'note-pane-hidden')}>
           <MarkdownEditor
             ref={editorRef}
@@ -472,7 +513,11 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
             placeholder={latex ? 'Write LaTeX… Type \\ for commands' : 'Start writing… Use [[ to link notes, $…$ for math, \\ for LaTeX commands'}
           />
         </div>
-        {showPreview && (
+        {historyOpen ? (
+          <div className="note-pane note-history-pane">
+            <NoteHistoryPanel path={path} currentContent={buffer.content} onClose={() => setHistoryOpen(false)} />
+          </div>
+        ) : showPreview ? (
           <div className="note-pane note-preview-pane content-selectable">
             {previewSource.trim() ? (
               <MarkdownRenderer content={previewSource} sourceId={resourceId} direction={direction} />
@@ -480,7 +525,7 @@ function NoteWindow({ resourceId, path, title }: { resourceId: string; path: str
               <div className="note-empty">Nothing to preview yet.</div>
             )}
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

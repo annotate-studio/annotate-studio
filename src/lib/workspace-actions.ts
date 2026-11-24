@@ -55,6 +55,7 @@ export function openFileOnCanvas(file: StudyFile, options: OpenOptions = {}): st
     toast.warning('This file type cannot be opened on the canvas', file.name);
     return null;
   }
+  useCanvas.getState().registerFileInWorkspace(file.path);
   const id = useCanvas.getState().openResource({ type, title: displayTitle(file), filePath: file.path }, options);
   useSettings.getState().touchRecent(file.path);
   return id;
@@ -71,7 +72,10 @@ export async function importPaths(paths: string[], at?: { x: number; y: number }
   if (paths.length === 0) return [];
   try {
     const files = await importFiles(paths);
-    files.forEach((file) => useLibrary.getState().upsert(file));
+    files.forEach((file) => {
+      useLibrary.getState().upsert(file);
+      useCanvas.getState().registerFileInWorkspace(file.path);
+    });
     openImported(files.filter((file) => resourceTypeFor(file)), at);
     const skipped = paths.length - files.length;
     if (skipped > 0) toast.warning(`${skipped} file${skipped > 1 ? 's were' : ' was'} skipped`, 'Only PDFs, images and text notes are supported.');
@@ -96,6 +100,7 @@ export async function importBrowserFiles(files: File[], at?: { x: number; y: num
       const name = file.name || `Pasted ${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
       const saved = await writeFileBytes({ dir: isNote ? 'notes' : 'documents', name, unique: true }, await file.arrayBuffer());
       useLibrary.getState().upsert(saved);
+      useCanvas.getState().registerFileInWorkspace(saved.path);
       imported.push(saved);
     } catch (error) {
       toast.error(`Could not import ${file.name}`, error);
@@ -133,6 +138,7 @@ export async function createNewNote(
     const content = options.content ?? `# ${title}\n\n`;
     const file = await createNote(title, content, options.extension);
     useLibrary.getState().upsert(file);
+    useCanvas.getState().registerFileInWorkspace(file.path);
     useCanvas.getState().openResource(
       { type: 'note', title: displayTitle(file), filePath: file.path },
       { at: options.at, near: options.near, focusExisting: false },

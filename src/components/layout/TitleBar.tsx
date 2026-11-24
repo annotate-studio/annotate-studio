@@ -6,9 +6,9 @@ import { isTauri } from '@/lib/tauri-commands';
 import { useIsClient } from '@/components/ui/Portal';
 import { flushAll } from '@/lib/persist';
 import { useApp } from '@/store/app';
-import { activeWorkspace, useCanvas } from '@/store/canvas';
 import { usePomodoro } from '@/store/pomodoro';
 import { cn, formatDuration } from '@/lib/utils';
+import WorkspaceSwitcher from '@/components/canvas/WorkspaceSwitcher';
 
 async function currentWindow() {
   const { getCurrentWindow } = await import('@tauri-apps/api/window');
@@ -42,8 +42,6 @@ export default function TitleBar() {
   const [maximized, setMaximized] = useState(false);
   const isClient = useIsClient();
   const desktop = isClient && isTauri();
-  const view = useApp((state) => state.currentView);
-  const workspaceName = useCanvas((state) => activeWorkspace(state).name);
 
   useEffect(() => {
     if (!desktop) return;
@@ -66,11 +64,9 @@ export default function TitleBar() {
       <div className="titlebar-brand" data-tauri-drag-region>
         <img className="titlebar-logo" src="/logo.svg" alt="" draggable={false} data-tauri-drag-region />
         <span data-tauri-drag-region>Annotate Studio</span>
-        {view === 'canvas' && (
-          <span className="titlebar-context" data-tauri-drag-region>
-            {workspaceName}
-          </span>
-        )}
+        <div className="titlebar-workspace">
+          <WorkspaceSwitcher />
+        </div>
       </div>
       <div className="titlebar-center" data-tauri-drag-region>
         <PomodoroChip />

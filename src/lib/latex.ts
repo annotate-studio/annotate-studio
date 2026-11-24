@@ -40,10 +40,15 @@ function readOptional(src: string, start: number): Group | null {
   return { value: src.slice(i + 1, close), end: close + 1 };
 }
 
+const CONTROL_SEQ = /\\[A-Za-z@]+/y;
+const DEF_PARAMS = /(\s*#\d)*/y;
+const ROW_SPACING = /\s*\[[^\]]*\]/y;
+
 function readControlSequence(src: string, start: number): Group | null {
   const i = skipSpaces(src, start);
   if (src[i] !== '\\') return null;
-  const letters = /^\\[A-Za-z@]+/.exec(src.slice(i));
+  CONTROL_SEQ.lastIndex = i;
+  const letters = CONTROL_SEQ.exec(src);
   if (letters) return { value: letters[0], end: i + letters[0].length };
   if (i + 1 < src.length) return { value: src.slice(i, i + 2), end: i + 2 };
   return null;
@@ -86,7 +91,8 @@ function parseDefinition(src: string, match: RegExpExecArray, macros: MacroMap):
     const name = readControlSequence(src, cursor);
     if (!name) return null;
     cursor = name.end;
-    const params = /^(\s*#\d)*/.exec(src.slice(cursor))?.[0] ?? '';
+    DEF_PARAMS.lastIndex = cursor;
+    const params = DEF_PARAMS.exec(src)?.[0] ?? '';
     cursor += params.length;
     const body = readGroup(src, cursor);
     if (!body) return null;
@@ -162,7 +168,8 @@ function splitRows(body: string): Row[] {
       else if (body.startsWith('\\end{', i)) envDepth = Math.max(0, envDepth - 1);
       if (body[i + 1] === '\\' && depth === 0 && envDepth === 0) {
         let end = i + 2;
-        const spacing = /^\s*\[[^\]]*\]/.exec(body.slice(end));
+        ROW_SPACING.lastIndex = end;
+        const spacing = ROW_SPACING.exec(body);
         if (spacing) end += spacing[0].length;
         rows.push({ text: body.slice(start, i), separator: body.slice(i, end) });
         start = end;

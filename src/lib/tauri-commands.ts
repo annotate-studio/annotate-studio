@@ -410,4 +410,22 @@ export const detectTexEngines = () => call<TexEngine[]>('detect_tex_engines');
 export const compileLatex = (path: string, engine?: string) => call<CompileResult>('compile_latex', { path, engine: engine && engine !== 'auto' ? engine : null });
 
 export const exportData = (outputPath: string) => call<number>('export_data', { outputPath });
+export interface FileRevision {
+  id: string;
+  hash: string;
+  timestamp: number;
+  size: number;
+  storedSize: number;
+  source: string;
+  summary?: string;
+}
+
+export const listFileRevisions = (path: string) => call<FileRevision[]>('list_file_revisions', { path });
+export const readFileRevisionText = (path: string, revisionId: string) =>
+  call<string>('read_file_revision_text', { path, revisionId });
+export const recordFileRevision = (path: string, source?: string, summary?: string) =>
+  call<FileRevision | null>('record_file_revision', { path, source, summary });
+export const restoreFileRevision = (path: string, revisionId: string) =>
+  call<StudyFile>('restore_file_revision', { path, revisionId });
+
 export const importData = (archivePath: string) => call<number>('import_data', { archivePath });

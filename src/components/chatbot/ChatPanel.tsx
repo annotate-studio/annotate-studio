@@ -163,6 +163,11 @@ export default function ChatPanel({ visible }: { visible: boolean }) {
             onRetry={(id) => {
               if (!engine.isBusy()) void engine.retry(id);
             }}
+            onRevert={(id) => {
+              void engine.revertPrompt(id).then((text) => {
+                if (text !== null) requestAnimationFrame(() => composerRef.current?.setDraft(text));
+              });
+            }}
             onOpenLesson={engine.openLesson}
             onChallenge={(id) => {
               if (!engine.isBusy()) void engine.challenge(id);

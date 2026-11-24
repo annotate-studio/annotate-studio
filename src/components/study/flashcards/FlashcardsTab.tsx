@@ -333,8 +333,8 @@ export default function FlashcardsTab() {
         </div>
       </aside>
 
-      <section className={cn('page', scoped.length === 0 && 'page-center')}>
-        <header className="page-header">
+      <section className={cn('page flashcards-page', scoped.length === 0 && 'page-center')}>
+        <header className="page-header flashcards-topbar">
           <div>
             <h1 dir="auto">{title}</h1>
             <p>
@@ -355,7 +355,8 @@ export default function FlashcardsTab() {
           </div>
         </header>
 
-        <div className="stat-row">
+        <div className="flashcards-body">
+          <div className="stat-row">
           <div className="stat">
             <Clock size={16} />
             <strong>{stats.due}</strong>
@@ -427,6 +428,7 @@ export default function FlashcardsTab() {
             </div>
           </>
         )}
+        </div>
       </section>
 
       <CardEditorDialog

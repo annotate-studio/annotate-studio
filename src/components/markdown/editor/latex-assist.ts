@@ -94,9 +94,38 @@ export function mathAt(state: EditorState, pos: number): MathSpan | null {
   return state.facet(documentKind) === 'latex' ? latexMathAt(state, pos) : markdownMathAt(state, pos);
 }
 
+const MACRO_HINT = /\\(?:newcommand|renewcommand|providecommand|DeclareMathOperator|def|gdef|let)\b/;
+
+function touchesMacroDefinition(tr: import('@codemirror/state').Transaction): boolean {
+  let touched = false;
+  tr.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+    if (touched) return;
+    if (MACRO_HINT.test(inserted.toString())) {
+      touched = true;
+      return;
+    }
+    const oldStart = tr.startState.doc.lineAt(fromA).from;
+    const oldEnd = tr.startState.doc.lineAt(toA).to;
+    if (MACRO_HINT.test(tr.startState.sliceDoc(oldStart, oldEnd))) {
+      touched = true;
+      return;
+    }
+    const newStart = tr.state.doc.lineAt(fromB).from;
+    const newEnd = tr.state.doc.lineAt(toB).to;
+    if (MACRO_HINT.test(tr.state.sliceDoc(newStart, newEnd))) {
+      touched = true;
+    }
+  });
+  return touched;
+}
+
 const macroField = StateField.define<{ macros: MacroMap; key: string; stale: boolean }>({
   create: () => ({ macros: {}, key: '', stale: true }),
-  update: (value, tr) => (tr.docChanged || tr.reconfigured ? { ...value, stale: true } : value),
+  update: (value, tr) => {
+    if (tr.reconfigured) return { ...value, stale: true };
+    if (!tr.docChanged || value.stale) return value;
+    return touchesMacroDefinition(tr) ? { ...value, stale: true } : value;
+  },
 });
 
 function currentMacros(view: EditorView): { macros: MacroMap; key: string } {

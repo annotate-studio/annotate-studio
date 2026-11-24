@@ -17,6 +17,12 @@ export type ChatReplay =
   | { kind: 'flashcards'; instructions?: string; text?: string; path?: string; title?: string; announce?: string }
   | { kind: 'prompt'; preset: PromptId; text?: string; context?: string; path?: string };
 
+export interface ChatStepDiff {
+  path: string;
+  before: string;
+  after: string;
+}
+
 export interface ChatStep {
   id: string;
   tool: string;
@@ -26,6 +32,7 @@ export interface ChatStep {
   paths?: string[];
   undoable?: boolean;
   undone?: boolean;
+  diff?: ChatStepDiff;
 }
 
 export type ChatMode = 'agent' | 'chat' | 'deep' | 'critique';
@@ -55,6 +62,11 @@ function migrateStep(raw: unknown): ChatStep | null {
   const data = raw as Record<string, unknown>;
   if (typeof data.label !== 'string') return null;
   const status = data.status === 'error' ? 'error' : 'done';
+  const rawDiff = data.diff && typeof data.diff === 'object' ? (data.diff as Record<string, unknown>) : null;
+  const diff: ChatStepDiff | undefined =
+    rawDiff && typeof rawDiff.path === 'string' && typeof rawDiff.before === 'string' && typeof rawDiff.after === 'string'
+      ? { path: rawDiff.path, before: rawDiff.before, after: rawDiff.after }
+      : undefined;
   return {
     id: typeof data.id === 'string' ? data.id : uid(),
     tool: typeof data.tool === 'string' ? data.tool : '',
@@ -63,6 +75,7 @@ function migrateStep(raw: unknown): ChatStep | null {
     summary: typeof data.summary === 'string' ? data.summary : undefined,
     paths: Array.isArray(data.paths) ? data.paths.filter((p): p is string => typeof p === 'string') : undefined,
     undone: data.undone === true ? true : undefined,
+    diff,
   };
 }
 
@@ -126,6 +139,7 @@ export interface SessionStore {
   clearSession: (id: string) => void;
   appendMessage: (sessionId: string, message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<Pick<ChatMessage, 'id' | 'timestamp'>>) => string;
   updateMessage: (sessionId: string, messageId: string, patch: Partial<ChatMessage>) => void;
+  truncateFrom: (sessionId: string, messageId: string) => ChatMessage[];
   setMemory: (sessionId: string, memory: SessionMemory | undefined) => void;
 }
 
@@ -274,6 +288,22 @@ function createSessionStore(
           ...s,
           messages: s.messages.map((m) => (m.id === messageId ? { ...m, ...patch } : m)),
         })),
+      truncateFrom: (sessionId, messageId) => {
+        const session = get().sessions.find((s) => s.id === sessionId);
+        if (!session) return [];
+        const index = session.messages.findIndex((m) => m.id === messageId);
+        if (index < 0) return [];
+        const kept = session.messages.slice(0, index);
+        const removed = session.messages.slice(index);
+        const memoryValid = session.memory ? kept.some((m) => m.id === session.memory!.lastId) : false;
+        updateSession(sessionId, (s) => ({
+          ...s,
+          messages: kept,
+          memory: memoryValid ? s.memory : undefined,
+          updatedAt: Date.now(),
+        }));
+        return removed;
+      },
     };
   });
 

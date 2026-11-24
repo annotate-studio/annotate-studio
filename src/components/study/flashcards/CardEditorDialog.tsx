@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Dialog from '@/components/ui/Dialog';
+import Checkbox from '@/components/ui/Checkbox';
 import { createFlashcard, updateFlashcard, type Flashcard } from '@/lib/tauri-commands';
 import { UNSORTED_ID, useFlashcards } from '@/store/flashcards';
 import { toast } from '@/store/toast';
@@ -59,12 +60,7 @@ export default function CardEditorDialog({ open, card, defaultCollectionId, onCl
       width={560}
       footer={
         <>
-          {!card && (
-            <label className="checkbox-row">
-              <input type="checkbox" checked={keepOpen} onChange={(event) => setKeepOpen(event.target.checked)} />
-              Add another after saving
-            </label>
-          )}
+          {!card && <Checkbox checked={keepOpen} onChange={setKeepOpen} label="Add another after saving" />}
           <div className="dialog-footer-spacer" />
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel

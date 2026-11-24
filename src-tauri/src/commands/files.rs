@@ -83,6 +83,14 @@ pub fn write_text_file(
     content: String,
 ) -> Result<StudyFile, String> {
     let full = state.workspace.resolve_user_file(&path)?;
+    if let Some(rel) = state.workspace.relative(&full) {
+        if let Ok(mut revs) = state.revisions.lock() {
+            if let Ok(existing) = std::fs::read(&full) {
+                let _ = revs.record(&rel, &existing, "autosave", None);
+            }
+            let _ = revs.record(&rel, content.as_bytes(), "autosave", None);
+        }
+    }
     write_atomic(&full, content.as_bytes())?;
     describe_or_err(&state, &full)
 }

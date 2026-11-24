@@ -11,6 +11,7 @@ import {
   Copy,
   FileText,
   Layers,
+  LayoutGrid,
   Loader2,
   Presentation,
   RotateCcw,
@@ -20,20 +21,57 @@ import {
 } from 'lucide-react';
 import MarkdownRenderer from '@/components/markdown/MarkdownRenderer';
 import FileLabel from '@/components/ui/FileLabel';
+import DiffView from '@/components/ui/DiffView';
 import type { ChatMessage, ChatStep } from '@/store/sessions';
 import VisualizationView from './VisualizationView';
 import { useApp } from '@/store/app';
+import { useCanvas } from '@/store/canvas';
 import { useLibrary } from '@/store/library';
+import { toast } from '@/store/toast';
 import { copyText, cn, baseName } from '@/lib/utils';
 import { isRtlText } from '@/lib/bidi';
 import { splitLesson } from '@/lib/ai';
 import { openFileOnCanvas } from '@/lib/workspace-actions';
+import type { Visualization } from '@/lib/visualizations';
+
+function visualTitle(viz: Visualization): string {
+  switch (viz.type) {
+    case 'timeline':
+      return 'Timeline';
+    case 'mindmap':
+      return viz.root || 'Mind Map';
+    case 'venn_diagram':
+      return `${viz.subjectA} vs ${viz.subjectB}`;
+    case 'cheat_sheet':
+      return viz.title || 'Cheat Sheet';
+    case 'bullet_list':
+      return viz.title || 'Key Notes';
+    case 'qa_grid':
+      return 'Why & How Questions';
+    case 'fallacy_list':
+      return 'Contradictions & Fallacies';
+    default:
+      return 'Study Visual';
+  }
+}
+
+function pinVisualizationToCanvas(viz: Visualization) {
+  const title = visualTitle(viz);
+  useCanvas.getState().openResource({
+    type: 'visual',
+    title,
+    visualization: viz,
+  });
+  useApp.getState().setView('canvas');
+  toast.success('Added to canvas', title);
+}
 
 interface ChatMessagesProps {
   messages: ChatMessage[];
   busy: boolean;
   status: string | null;
   onRetry: (id: string) => void;
+  onRevert?: (id: string) => void;
   onOpenLesson: (topic: string, steps: string[]) => void;
   onChallenge?: (id: string) => void;
   onUndo?: (messageId: string, stepId: string) => void;
@@ -50,31 +88,42 @@ function openPath(path: string) {
 
 function StepRow({ step, onUndo, canUndo }: { step: ChatStep; onUndo?: () => void; canUndo: boolean }) {
   return (
-    <div className={cn('agent-step', `agent-step-${step.status}`)}>
-      <span className="agent-step-icon">
-        {step.status === 'running' ? <Loader2 size={12} className="spin" /> : step.status === 'error' ? <XCircle size={12} /> : <CheckCircle2 size={12} />}
-      </span>
-      <span className="agent-step-label" dir="auto">
-        {step.label}
-      </span>
-      {step.summary && !(step.paths ?? []).some((path) => baseName(path) === step.summary) && (
-        <span className="agent-step-summary" dir="auto">
-          {step.summary}
+    <div className="agent-step-group">
+      <div className={cn('agent-step', `agent-step-${step.status}`)}>
+        <span className="agent-step-icon">
+          {step.status === 'running' ? <Loader2 size={12} className="spin" /> : step.status === 'error' ? <XCircle size={12} /> : <CheckCircle2 size={12} />}
         </span>
+        <span className="agent-step-label" dir="auto">
+          {step.label}
+        </span>
+        {step.summary && !(step.paths ?? []).some((path) => baseName(path) === step.summary) && (
+          <span className="agent-step-summary" dir="auto">
+            {step.summary}
+          </span>
+        )}
+        {step.paths?.slice(0, 3).map((path) => (
+          <button key={path} type="button" className="agent-step-link" onClick={() => openPath(path)} title={`Open ${path}`}>
+            <FileText size={11} />
+            <FileLabel path={path} />
+          </button>
+        ))}
+        {step.undone ? (
+          <span className="agent-step-undone">Undone</span>
+        ) : step.undoable && canUndo && onUndo ? (
+          <button type="button" className="agent-step-undo" onClick={onUndo} title="Undo this change">
+            <Undo2 size={11} /> Undo
+          </button>
+        ) : null}
+      </div>
+      {step.diff && (
+        <DiffView
+          path={step.diff.path}
+          before={step.diff.before}
+          after={step.diff.after}
+          defaultOpen={false}
+          compact
+        />
       )}
-      {step.paths?.slice(0, 3).map((path) => (
-        <button key={path} type="button" className="agent-step-link" onClick={() => openPath(path)} title={`Open ${path}`}>
-          <FileText size={11} />
-          <FileLabel path={path} />
-        </button>
-      ))}
-      {step.undone ? (
-        <span className="agent-step-undone">Undone</span>
-      ) : step.undoable && canUndo && onUndo ? (
-        <button type="button" className="agent-step-undo" onClick={onUndo} title="Undo this change">
-          <Undo2 size={11} /> Undo
-        </button>
-      ) : null}
     </div>
   );
 }
@@ -104,6 +153,7 @@ function Reasoning({ text, live }: { text: string; live: boolean }) {
 const MessageBubble = memo(function MessageBubble({
   message,
   onRetry,
+  onRevert,
   onOpenLesson,
   onChallenge,
   onUndo,
@@ -111,6 +161,7 @@ const MessageBubble = memo(function MessageBubble({
 }: {
   message: ChatMessage;
   onRetry: (id: string) => void;
+  onRevert?: (id: string) => void;
   onOpenLesson: (topic: string, steps: string[]) => void;
   onChallenge?: (id: string) => void;
   onUndo?: (messageId: string, stepId: string) => void;
@@ -136,6 +187,13 @@ const MessageBubble = memo(function MessageBubble({
                   <FileText size={11} /> <FileLabel path={name} />
                 </span>
               ))}
+            </div>
+          )}
+          {onRevert && (
+            <div className="chat-user-actions">
+              <button type="button" onClick={() => onRevert(message.id)} title="Revert conversation to this prompt and edit">
+                <Undo2 size={11} /> Revert
+              </button>
             </div>
           )}
         </div>
@@ -221,6 +279,15 @@ const MessageBubble = memo(function MessageBubble({
                 <button type="button" onClick={() => void copyText(message.content).then(setCopied)} title="Copy">
                   {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy'}
                 </button>
+                {message.visualization && (
+                  <button
+                    type="button"
+                    onClick={() => pinVisualizationToCanvas(message.visualization!)}
+                    title="Render this visual directly on the canvas"
+                  >
+                    <LayoutGrid size={12} /> Add to canvas
+                  </button>
+                )}
                 {lessonSteps.length > 1 && (
                   <button
                     type="button"
@@ -244,7 +311,7 @@ const MessageBubble = memo(function MessageBubble({
   );
 });
 
-export default function ChatMessages({ messages, busy, status, onRetry, onOpenLesson, onChallenge, onUndo, canUndo, emptyHint }: ChatMessagesProps) {
+export default function ChatMessages({ messages, busy, status, onRetry, onRevert, onOpenLesson, onChallenge, onUndo, canUndo, emptyHint }: ChatMessagesProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const streamingVisible = messages.some((message) => message.streaming);
@@ -269,6 +336,7 @@ export default function ChatMessages({ messages, busy, status, onRetry, onOpenLe
           key={message.id}
           message={message}
           onRetry={onRetry}
+          onRevert={onRevert}
           onOpenLesson={onOpenLesson}
           onChallenge={onChallenge}
           onUndo={onUndo}

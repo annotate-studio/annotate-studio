@@ -5,3 +5,4 @@ pub mod files;
 pub mod flashcards;
 pub mod index;
 pub mod latex;
+pub mod revisions;

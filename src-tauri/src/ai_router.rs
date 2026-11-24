@@ -1,7 +1,6 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::time::Duration;
 
 use crate::text::{strip_reasoning, truncate_chars};
 
@@ -362,15 +361,15 @@ fn chat_payload(messages: &[ChatMessage]) -> Vec<Value> {
 
 impl AIRouter {
     pub fn new() -> Self {
-        let client = Client::builder()
-            .connect_timeout(Duration::from_secs(20))
-            .timeout(Duration::from_secs(600))
-            .build()
-            .unwrap_or_else(|_| Client::new());
+        let client = crate::proxy::build_http_client(Some(600), 20);
         Self {
             providers: Vec::new(),
             client,
         }
+    }
+
+    pub fn refresh_client(&mut self) {
+        self.client = crate::proxy::build_http_client(Some(600), 20);
     }
 
     pub fn providers(&self) -> &[AIProvider] {

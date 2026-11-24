@@ -35,7 +35,7 @@ function kind(file: StudyFile): string {
   return file.file_type === 'Markdown' ? 'note' : 'text';
 }
 
-export async function workspaceManifest(focus: string[], limit = 140): Promise<string> {
+export async function workspaceManifest(focus: string[], limit = 50): Promise<string> {
   const files = await libraryFiles();
   if (files.length === 0) return 'The workspace is empty.';
   const index = await indexStatus().catch(() => []);

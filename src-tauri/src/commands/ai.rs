@@ -317,7 +317,7 @@ pub async fn ai_turn(
         .filter(|id| !id.trim().is_empty())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let generation = state.generations.begin(&request_id);
-    let client = state.stream_client.clone();
+    let client = state.http_stream_client();
     let runner = TurnRunner {
         client: &client,
         cancel: generation.flag(),

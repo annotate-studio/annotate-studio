@@ -6,13 +6,15 @@ pub mod analytics;
 pub mod commands;
 pub mod filesystem;
 pub mod paths;
+pub mod proxy;
+pub mod revisions;
 pub mod search_index;
 pub mod spaced_repetition;
 pub mod state;
 pub mod storage;
 pub mod text;
 
-use commands::{ai, backup, data, files, flashcards, index, latex};
+use commands::{ai, backup, data, files, flashcards, index, latex, revisions as revision_cmds};
 use paths::Workspace;
 use state::AppState;
 use tauri::Manager;
@@ -98,6 +100,10 @@ pub fn run() {
             index::ocr_cache_put,
             latex::detect_tex_engines,
             latex::compile_latex,
+            revision_cmds::list_file_revisions,
+            revision_cmds::read_file_revision_text,
+            revision_cmds::record_file_revision,
+            revision_cmds::restore_file_revision,
             backup::export_data,
             backup::import_data,
         ])
