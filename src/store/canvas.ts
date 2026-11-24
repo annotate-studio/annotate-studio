@@ -2,9 +2,8 @@ import { create } from 'zustand';
 import { loadCanvasState, saveCanvasState } from '@/lib/tauri-commands';
 import { createSaver } from '@/lib/persist';
 import { clamp, uid } from '@/lib/utils';
-import { parseVisualization, type Visualization } from '@/lib/visualizations';
 
-export type ResourceType = 'pdf' | 'note' | 'image' | 'visual';
+export type ResourceType = 'pdf' | 'note' | 'image';
 
 export interface CanvasView {
   x: number;
@@ -18,7 +17,6 @@ export interface Resource {
   title: string;
   filePath?: string;
   content?: string;
-  visualization?: Visualization;
   x: number;
   y: number;
   width: number;
@@ -57,7 +55,6 @@ export const DEFAULT_SIZES: Record<ResourceType, { width: number; height: number
   pdf: { width: 760, height: 880 },
   note: { width: 680, height: 560 },
   image: { width: 560, height: 440 },
-  visual: { width: 640, height: 480 },
 };
 
 export interface OpenResourceInput {
@@ -65,7 +62,6 @@ export interface OpenResourceInput {
   title: string;
   filePath?: string;
   content?: string;
-  visualization?: Visualization;
   width?: number;
   height?: number;
 }
@@ -144,7 +140,7 @@ export function toWorkspaceRelative(path: string): string {
 }
 
 function isResourceType(value: unknown): value is ResourceType {
-  return value === 'pdf' || value === 'note' || value === 'image' || value === 'visual';
+  return value === 'pdf' || value === 'note' || value === 'image';
 }
 
 function migrateResource(raw: unknown, index: number): Resource | null {
@@ -163,15 +159,12 @@ function migrateResource(raw: unknown, index: number): Resource | null {
   const baseH = wasFullscreen && previous ? previous.height : data.height ?? size.height;
   const filePath = typeof data.filePath === 'string' && data.filePath.trim() ? toWorkspaceRelative(data.filePath.trim()) : undefined;
   const content = typeof data.content === 'string' ? data.content : undefined;
-  const visualization = type === 'visual' ? parseVisualization(data.visualization) ?? undefined : undefined;
-  if (type === 'visual' && !visualization) return null;
   return {
     id: typeof data.id === 'string' && data.id ? data.id : uid(),
     type,
     title: typeof data.title === 'string' && data.title.trim() ? data.title : 'Untitled',
     filePath,
     content: type === 'note' ? content : undefined,
-    visualization,
     x: finiteOr(baseX, 80 + index * 32),
     y: finiteOr(baseY, 80 + index * 32),
     width: Math.max(MIN_WINDOW_WIDTH, finiteOr(baseW, defaults.width)),
@@ -576,7 +569,6 @@ export const useCanvas = create<CanvasStore>((set, get) => {
         title: input.title,
         filePath: input.filePath,
         content: input.content,
-        visualization: input.visualization,
         ...position,
         ...size,
         z: topZ(resources) + 1,

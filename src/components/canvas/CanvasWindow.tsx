@@ -11,7 +11,6 @@ import {
   NotebookPen,
   Pencil,
   ScanSearch,
-  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -31,7 +30,6 @@ import { toast } from '@/store/toast';
 import PdfWindow from './PdfWindow';
 import NoteWindow from './NoteWindow';
 import ImageWindow from './ImageWindow';
-import VisualWindow from './VisualWindow';
 import AiActionsButton from './AiActionsButton';
 
 type Handle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
@@ -41,7 +39,6 @@ const TYPE_ICONS: Record<Resource['type'], React.ReactNode> = {
   pdf: <FileText size={14} />,
   note: <NotebookPen size={14} />,
   image: <ImageIcon size={14} />,
-  visual: <Sparkles size={14} />,
 };
 
 function currentZoom(): number {
@@ -57,20 +54,14 @@ const WindowBody = memo(function WindowBody({
   type,
   filePath,
   title,
-  visualization,
   selected,
 }: {
   id: string;
   type: Resource['type'];
   filePath?: string;
   title: string;
-  visualization?: Resource['visualization'];
   selected: boolean;
 }) {
-  if (type === 'visual') {
-    if (!visualization) return <div className="cw-empty">This visual has no data.</div>;
-    return <VisualWindow resourceId={id} title={title} visualization={visualization} />;
-  }
   if (!filePath) {
     return <div className="cw-empty">This window has no file attached.</div>;
   }
@@ -315,7 +306,6 @@ function CanvasWindow({ resource }: { resource: Resource }) {
           type={resource.type}
           filePath={resource.filePath}
           title={resource.title}
-          visualization={resource.visualization}
           selected={selected}
         />
       </div>

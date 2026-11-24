@@ -550,7 +550,7 @@ function AssistantPane() {
           <Checkbox
             checked={agent.allowWrites}
             onChange={(allowWrites) => updateAgent({ allowWrites })}
-            label="Allow it to create and edit notes, flashcards, exams and canvas visuals"
+            label="Allow it to create and edit notes, flashcards and exams"
           />
           <Checkbox
             checked={agent.confirmEdits}

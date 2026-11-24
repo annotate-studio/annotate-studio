@@ -11,7 +11,6 @@ import {
   Copy,
   FileText,
   Layers,
-  LayoutGrid,
   Loader2,
   Presentation,
   RotateCcw,
@@ -25,46 +24,11 @@ import DiffView from '@/components/ui/DiffView';
 import type { ChatMessage, ChatStep } from '@/store/sessions';
 import VisualizationView from './VisualizationView';
 import { useApp } from '@/store/app';
-import { useCanvas } from '@/store/canvas';
 import { useLibrary } from '@/store/library';
-import { toast } from '@/store/toast';
 import { copyText, cn, baseName } from '@/lib/utils';
 import { isRtlText } from '@/lib/bidi';
 import { splitLesson } from '@/lib/ai';
 import { openFileOnCanvas } from '@/lib/workspace-actions';
-import type { Visualization } from '@/lib/visualizations';
-
-function visualTitle(viz: Visualization): string {
-  switch (viz.type) {
-    case 'timeline':
-      return 'Timeline';
-    case 'mindmap':
-      return viz.root || 'Mind Map';
-    case 'venn_diagram':
-      return `${viz.subjectA} vs ${viz.subjectB}`;
-    case 'cheat_sheet':
-      return viz.title || 'Cheat Sheet';
-    case 'bullet_list':
-      return viz.title || 'Key Notes';
-    case 'qa_grid':
-      return 'Why & How Questions';
-    case 'fallacy_list':
-      return 'Contradictions & Fallacies';
-    default:
-      return 'Study Visual';
-  }
-}
-
-function pinVisualizationToCanvas(viz: Visualization) {
-  const title = visualTitle(viz);
-  useCanvas.getState().openResource({
-    type: 'visual',
-    title,
-    visualization: viz,
-  });
-  useApp.getState().setView('canvas');
-  toast.success('Added to canvas', title);
-}
 
 interface ChatMessagesProps {
   messages: ChatMessage[];
@@ -279,15 +243,6 @@ const MessageBubble = memo(function MessageBubble({
                 <button type="button" onClick={() => void copyText(message.content).then(setCopied)} title="Copy">
                   {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy'}
                 </button>
-                {message.visualization && (
-                  <button
-                    type="button"
-                    onClick={() => pinVisualizationToCanvas(message.visualization!)}
-                    title="Render this visual directly on the canvas"
-                  >
-                    <LayoutGrid size={12} /> Add to canvas
-                  </button>
-                )}
                 {lessonSteps.length > 1 && (
                   <button
                     type="button"
